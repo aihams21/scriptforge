@@ -298,3 +298,110 @@ def test_batch_positional_args(tmp_path):
 def test_powershell_comment_is_not_the_tag(tmp_path):
     p = write(tmp_path, "d.ps1", "<#\nProbe the target\n#>\nparam([string]$T)\n")
     assert analyze(p).description == "Probe the target"
+
+
+# --- regression: the bashlex AST path was silently inert --------------------
+#
+# Every bash script reported "recovered by scan". Three separate shape
+# assumptions in the AST walker meant it never contributed anything, so the
+# structure it is supposed to own (case menus, select, getopts) was coming from
+# the regex scanner by accident.
+
+def _tmp(tmp_path, body, name="s.sh"):
+    p = tmp_path / name
+    p.write_text(body)
+    p.chmod(0o755)
+    return p
+
+
+def test_ast_path_is_actually_used(tmp_path):
+    """bashlex.parse returns a LIST for multi-statement scripts.
+
+    The walker read `.kind` off the result directly, which raised AttributeError
+    on every script longer than one command, and the blanket except turned that
+    into a silent downgrade to the scanner.
+    """
+
+    ir = analyze(
+        _tmp(
+            tmp_path,
+            "#!/bin/bash\n"
+            "echo one\n"
+            'read -rp "host: " host\n'
+            "echo two\n",
+        )
+    )
+    assert ir.parse_mode == "ast", ir.warnings
+
+
+def test_plain_read_has_no_redirect_node(tmp_path):
+    """`read -rp "q" v` is a plain command in bashlex; only the explicit
+    `< /dev/tty` form becomes a redirect, so a redirect-only walker sees
+    nothing."""
+
+    ir = analyze(_tmp(tmp_path, "#!/bin/bash\nread -rp \"who: \" who\necho $who\n"))
+    assert [p.var for p in ir.prompt_sites] == ["who"]
+    assert ir.prompt_sites[0].prompt == "who:"
+
+
+def test_read_command_name_is_not_a_variable(tmp_path):
+    """`read` itself used to be consumed as the target variable, turning one
+    read into four sites (`read`, `target`, `host:`, `host`)."""
+
+    ir = analyze(_tmp(tmp_path, "#!/bin/bash\nread -rp \"target host: \" host\n"))
+    assert [p.var for p in ir.prompt_sites] == ["host"]
+
+
+def test_option_case_labels_are_not_subcommands(tmp_path):
+    """`case $opt in v) ... p) ...` is a getopts dispatcher. Its labels must not
+    be offered as modes."""
+
+    ir = analyze(
+        _tmp(
+            tmp_path,
+            "#!/bin/bash\n"
+            "while getopts \":vp:\" opt; do\n"
+            "  case \"$opt\" in\n"
+            "    v) verbose=1 ;;\n"
+            "    p) port=$OPTARG ;;\n"
+            "  esac\n"
+            "done\n",
+        )
+    )
+    assert not [c for c in ir.subcommands if c.name in ("v", "p")]
+    assert {f.short for f in ir.flags} == {"-v", "-p"}
+
+
+def test_mode_variable_still_yields_subcommands(tmp_path):
+    """The counterpart: a dispatcher on a variable assigned from $1 is a real
+    mode menu, and rejecting it would lose start/stop/status."""
+
+    ir = analyze(
+        _tmp(
+            tmp_path,
+            "#!/bin/bash\n"
+            'mode="${1:-status}"\n'
+            'case "$mode" in\n'
+            "  start) echo up ;;\n"
+            "  stop)  echo down ;;\n"
+            "  status) echo on ;;\n"
+            "esac\n",
+        )
+    )
+    assert {c.name for c in ir.subcommands} == {"start", "stop", "status"}
+
+
+def test_value_switch_labels_are_not_subcommands(tmp_path):
+    """`case "$port" in` is a value comparison, not a menu."""
+
+    ir = analyze(
+        _tmp(
+            tmp_path,
+            "#!/bin/bash\n"
+            'case "$port" in\n'
+            "  22) echo ssh ;;\n"
+            "  443) echo tls ;;\n"
+            "esac\n",
+        )
+    )
+    assert not [c for c in ir.subcommands if c.name in ("22", "443")]

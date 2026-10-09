@@ -119,6 +119,17 @@ def analyze_bash(path: Path) -> ScriptIR:
         ir.kind = Kind.SKELETAL
         return ir
 
+    # Split of labour, decided by what each method is actually good at:
+    #
+    #   AST    - case branches, select menus, getopts in context
+    #   scanner - prompt text and line numbers
+    #
+    # bashlex reports lineno inconsistently (0 on synthesised nodes) and cannot
+    # see that `read x < file` is not a question, so prompt recovery from the AST
+    # produced sites with no line, wrong prompts, and false positives on piped
+    # reads. The scanner has none of those problems. Running both and keeping
+    # the AST only for structure beats picking one.
+    ast_ok = False
     if HAS_BASHLEX:
         import signal
 
@@ -131,18 +142,17 @@ def analyze_bash(path: Path) -> ScriptIR:
                 signal.alarm(0)
                 signal.signal(signal.SIGALRM, previous)
             _walk_bash(tree, ir, lines)
-            ir.parse_mode = "ast"
+            ast_ok = True
         except _Timeout:
-            ir.warnings.append("bashlex timed out; used line scanner")
-            _scan_bash(lines, ir)
-            ir.parse_mode = "scan"
+            ir.warnings.append("bashlex timed out; structure from line scanner")
         except Exception as exc:  # noqa: BLE001 - any parse error -> fallback
-            ir.warnings.append(f"bashlex failed ({type(exc).__name__}); used line scanner")
-            _scan_bash(lines, ir)
-            ir.parse_mode = "scan"
-    else:
-        _scan_bash(lines, ir)
-        ir.parse_mode = "scan"
+            ir.warnings.append(f"bashlex failed ({type(exc).__name__}); structure from line scanner")
+
+    # Structure the AST found is kept; prompts are re-derived from source lines
+    # so they carry a real line number.
+    ir.prompt_sites = []
+    _scan_bash(lines, ir)
+    ir.parse_mode = "ast" if ast_ok else "scan"
 
     ir.prompt_sites = _dedupe_prompts(ir.prompt_sites)
     ir.subcommands = _dedupe_subcommands(ir.subcommands)
@@ -155,20 +165,54 @@ def analyze_bash(path: Path) -> ScriptIR:
 # --------------------------------------------------------------------------- ast
 
 
+def _words_of(node) -> list:
+    """Word nodes belonging to a command, in either bashlex shape.
+
+    `command.parts` is a flat list of word nodes. Some node kinds wrap the
+    command in an inner list instead, so both are accepted: reading
+    `parts[0]` unconditionally yielded a single node, every `isinstance(parts[0],
+    list)` guard failed, and the AST path silently collected nothing.
+    """
+
+    parts = getattr(node, "parts", None) or []
+    if parts and isinstance(parts[0], list):
+        return parts[0]
+    return parts
+
+
 def _walk_bash(node, ir: ScriptIR, lines: list[str]) -> None:
-    """Recurse the bashlex tree pulling out prompts, cases, getopts."""
+    """Recurse the bashlex tree pulling out prompts, cases, getopts.
+
+    `bashlex.parse` returns a bare node for a one-command script and a *list*
+    of nodes for anything longer. Reading `.kind` straight off the result raised
+    AttributeError on every multi-statement script, the blanket except swallowed
+    it, and the whole AST path silently degraded to the regex scanner. Accept
+    both shapes at the boundary instead.
+    """
+    if isinstance(node, list):
+        for child in node:
+            _walk_bash(child, ir, lines)
+        return
+
     kind = node.kind
 
     if kind == "redirect" and _redirect_is_stdin(node):
         _extract_read(node, ir, lines)
         return
 
-    if kind == "command" and node.parts and isinstance(node.parts[0], list):
-        words = node.parts[0]
-        if words and getattr(words[0], "word", "").strip("'\"") == "getopts":
+    if kind == "command" and getattr(node, "parts", None):
+        words = _words_of(node)
+        head = getattr(words[0], "word", "").strip("'\"") if words else ""
+        if head == "getopts":
             _extract_getopts(words, ir)
-        if words and getattr(words[0], "word", "").strip("'\"") == "select":
+        elif head == "select":
             _extract_select(node, ir, lines)
+        elif head == "read":
+            # Plain `read -rp "q" var` produces no redirect node at all: bashlex
+            # emits a bare command. Only the explicit `read ... < /dev/tty`
+            # form arrives as a redirect, so the redirect branch above never
+            # saw the most common shape in the wild.
+            _extract_read(node, ir, lines)
 
     if kind == "case":
         _extract_case(node, ir)
@@ -191,8 +235,9 @@ def _redirect_is_stdin(node) -> bool:
 
 def _extract_read(node, ir: ScriptIR, lines: list[str]) -> None:
     """`read -p 'question' var` -> PromptSite. `read -r a b` -> fall back to vars."""
-    parts = node.parts
-    words = parts[0] if parts and isinstance(parts[0], list) else []
+    words = _words_of(node)
+    if not words:
+        return
 
     prompt_text = ""
     varname = ""
@@ -239,9 +284,18 @@ def _extract_read(node, ir: ScriptIR, lines: list[str]) -> None:
 
 
 def _read_args(words) -> tuple[str, str]:
-    """Pull (prompt, firstVar) out of a `read` argv list of bashlex words."""
+    """Pull (prompt, firstVar) out of a `read` argv list of bashlex words.
+
+    `_words_of` returns the whole command including its name, so `read` itself
+    has to be dropped first: treated as a variable it became the prompt target
+    and every remaining word was appended to it, turning one read into four
+    bogus sites.
+    """
     prompt = ""
     varname = ""
+    words = list(words)
+    if words and not getattr(words[0], "word", "").startswith("-"):
+        words = words[1:]
     i = 0
     saw_p = False
     while i < len(words):
@@ -335,12 +389,46 @@ def _extract_getopts(words, ir: ScriptIR) -> None:
 
 READ_RE = re.compile(r"\bread\s+(?:-[a-zA-Z]*\s+)*(?:-p\s+)?([^\n;|)]*)")
 CASE_LABEL_RE = re.compile(r"^\s*([a-z0-9_-]+|\*)\)\s*(.*)$")
+CASE_OPEN_RE = re.compile(r"^\s*case\s+(.+?)\s+in\s*$")
+# `case $opt in v) ... p) ...` is an option dispatcher, not a command menu, so
+# its labels must not become subcommands. Recognising it needs the subject.
+CASE_OPTION_SUBJECT_RE = re.compile(r"\$(opt|OPT|opts|OPTS|option|choice|answer)\b")
+# `mode="${1:-status}"` / `cmd=$1` - the variable a dispatcher switches on.
+CMD_VAR_ASSIGN_RE = re.compile(r"^\s*([a-zA-Z_]\w*)\s*=\s*[\"']?\$\{?1\b")
+# Labels that are really switch options, not mode names.
+NOT_A_COMMAND_RE = re.compile(r"^[-[.\s]")
 GETOPTS_RE = re.compile(r"getopts\s+[\"':]*([a-zA-Z:]+)")
 SELECT_RE = re.compile(r"^\s*select\s+(\w+)\s+in\s+(.+)$")
 READ_P_RE = re.compile(r"read\s+(?:-[a-zA-Z]*p[a-zA-Z]*)\s+[\"']?([^\"']*)[\"']?")
 
 
+def _command_variables(lines: list[str]) -> set[str]:
+    """Variables assigned straight from the positional argument.
+
+    `case "$mode" in` is as much a dispatcher as `case "$1" in`, and the mode
+    names are worth showing, but `case "$port" in` is a value switch and its
+    labels are not. Tracing the assignment is what separates them.
+    """
+
+    return {m.group(1) for line in lines if (m := CMD_VAR_ASSIGN_RE.match(line))}
+
+
+def _is_command_subject(subject: str, cmd_vars: set[str]) -> bool:
+    """Does this `case` name the program's modes?"""
+
+    if CASE_OPTION_SUBJECT_RE.search(subject):
+        return False
+    if "$1" in subject or "${1" in subject:
+        return True
+    names = re.findall(r"\$\{?([a-zA-Z_]\w*)", subject)
+    return bool(names) and all(n in cmd_vars for n in names)
+
+
 def _scan_bash(lines: list[str], ir: ScriptIR) -> None:
+    # Set when a `case ... in` block opens; nested cases reset it at their esac.
+    case_depth = 0
+    case_is_dispatch = False
+    cmd_vars = _command_variables(lines)
     if len(lines) > MAX_PARSE_LINES:
         # Scan only the head/tail of a generated artefact.
         lines = lines[:500] + ["..."] + lines[-200:]
@@ -412,11 +500,26 @@ def _scan_bash(lines: list[str], ir: ScriptIR) -> None:
                 )
             continue
 
-        m_c = CASE_LABEL_RE.match(line)
-        if m_c:
-            name, inline_help = m_c.group(1), m_c.group(2).strip()
-            if name not in ("*", "esac", ";;") and inline_help:
-                ir.subcommands.append(SubCommand(name=name, help=humanize(name)))
+        if case_depth:
+            if re.match(r"^\s*esac\b", line):
+                case_depth = 0
+                case_is_dispatch = False
+                continue
+            if case_is_dispatch:
+                m_c = CASE_LABEL_RE.match(line)
+                if m_c:
+                    name, inline_help = m_c.group(1), m_c.group(2).strip()
+                    if name not in ("*", "esac", ";;") and inline_help and not NOT_A_COMMAND_RE.match(name):
+                        ir.subcommands.append(SubCommand(name=name, help=humanize(name)))
+            continue
+
+        m_open = CASE_OPEN_RE.match(line)
+        if m_open:
+            case_depth = 1
+            subject = m_open.group(1)
+            # Only a dispatcher on the positional argument names modes.
+            case_is_dispatch = _is_command_subject(subject, cmd_vars)
+            continue
 
     # usage() blocks document subcommands as `name   description`
     for name, helptext in _usage_subcommands(lines):

@@ -345,7 +345,7 @@ The terminal UI stays because it is faster over SSH, where a GUI has no place.
 ## Tests
 
 ```
-76 passed
+82 passed
 ```
 
 The window is tested headless under `QT_QPA_PLATFORM=offscreen`, which is the
