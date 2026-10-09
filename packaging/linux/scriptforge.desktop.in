@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=ScriptForge
+GenericName=Script to App Forge
+Comment=Turn any bash or python script into a usable app
+Exec=@EXEC@
+Icon=scriptforge
+Terminal=true
+Categories=Development;
+Keywords=pentest;security;bash;python;wrapper;ctf;kali;terminal;
+StartupNotify=false
+StartupWMClass=scriptforge
+X-GNOME-SingleWindow=false
