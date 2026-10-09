@@ -45,6 +45,21 @@ YES_DEFAULT_RE = re.compile(r"\[\s*([yY])\s*/\s*([nN])\s*\]|\[\s*([nN])\s*/\s*([
 DEFAULT_IN_PROMPT_RE = re.compile(r"\[([^\]]+)\]\s*:?\s*$")
 
 
+def flag_token(spec: ir_mod.FlagSpec) -> str:
+    """The literal to put on the command line.
+
+    bash getopts has no long options, and the parser fills `long` with the short
+    letter as a convenience ("--p"). Sending that would make the script reject
+    the line, so the short form is used whenever the long one is synthesised.
+    """
+
+    short = spec.short or ""
+    long_ = spec.long or ""
+    if not long_ or long_ == "--" + short.lstrip("-"):
+        return short
+    return long_
+
+
 def _is_required(site: ir_mod.PromptSite) -> bool:
     """Would the script stall if this were left blank?"""
 
@@ -412,6 +427,10 @@ class InterfacePanel(QtWidgets.QWidget):
         super().__init__()
         self.s = s
         self.inputs: dict[str, QtWidgets.QWidget] = {}
+        self.args_fields: dict[str, QtWidgets.QWidget] = {}
+        self.flag_fields: dict[str, QtWidgets.QWidget] = {}
+        self.flag_boxes: dict[str, QtWidgets.QWidget] = {}
+        self.mode_picker: QtWidgets.QComboBox | None = None
         self.script = None
         self.body = QtWidgets.QVBoxLayout(self)
         self.body.setContentsMargins(16, 14, 16, 14)
@@ -435,6 +454,10 @@ class InterfacePanel(QtWidgets.QWidget):
             if item.widget():
                 item.widget().setParent(None)
         self.inputs.clear()
+        self.args_fields.clear()
+        self.flag_fields.clear()
+        self.flag_boxes.clear()
+        self.mode_picker = None
 
     def _render(self) -> None:
         s = self.s
@@ -446,10 +469,35 @@ class InterfacePanel(QtWidgets.QWidget):
             self.body.addStretch(1)
             return
 
+        modes = self.script.subcommands
+        args = self.script.positional_args
+        flags = self.script.flags
         sites = self.script.prompt_sites
-        if not sites:
+
+        # A parametric script has no prompts at all - it takes modes, arguments
+        # and flags. Rendering only prompt_sites showed "this script has no
+        # built-in interface" for every argparse or getopts tool, which is the
+        # opposite of true: there was simply nothing on screen to fill in.
+        if not (modes or args or flags or sites):
             self.body.addStretch(1)
             self.body.addWidget(_empty(s.no_fields, s.no_fields_hint))
+            self.body.addStretch(1)
+            return
+
+        if modes:
+            self.body.addWidget(_label(s.section_questions and s.section_modes, "h2"))
+            self.body.addWidget(self._mode_row(modes))
+
+        if args:
+            self.body.addWidget(_label(s.section_args.upper(), "h2"))
+            for spec in args:
+                self.body.addWidget(self._arg_row(spec))
+
+        if flags:
+            self.body.addWidget(_label(s.section_flags.upper(), "h2"))
+            self.body.addWidget(self._flag_block(flags))
+
+        if not sites:
             self.body.addStretch(1)
             return
 
@@ -488,6 +536,88 @@ class InterfacePanel(QtWidgets.QWidget):
 
         self.body.addStretch(1)
 
+    def _mode_row(self, modes) -> QtWidgets.QWidget:
+        """A sub-command picker.
+
+        Rendered as a combo rather than free text so the operator picks one of
+        the modes the script actually implements instead of typing a name and
+        discovering the `*)` fallback ate it.
+        """
+
+        row = QtWidgets.QWidget()
+        grid = QtWidgets.QGridLayout(row)
+        grid.setContentsMargins(0, 2, 0, 2)
+        grid.setHorizontalSpacing(14)
+
+        picker = QtWidgets.QComboBox()
+        for mode in modes:
+            # humanize(name) is what lands in `help`, so showing both reads as
+            # "status - Status".
+            note = mode.help if mode.help and mode.help.lower() != mode.name.lower() else ""
+            picker.addItem(f"{mode.name}  —  {note}" if note else mode.name, mode.name)
+        picker.setCurrentIndex(self._preferred_mode(modes))
+        picker.setToolTip(self.s.pick_mode)
+        self.mode_picker = picker
+
+        grid.addWidget(_label(self.s.field_mode, "key"), 0, 0)
+        grid.addWidget(picker, 0, 1)
+        grid.setColumnStretch(1, 1)
+        return row
+
+    def _preferred_mode(self, modes) -> int:
+        """Start on the harmless mode.
+
+        `status` and `show` and `list` report; `start`, `run`, `delete` and
+        `stop` change something. Defaulting to a mutating action means the
+        operator's first click does damage they did not intend.
+        """
+
+        safe = {"status", "show", "list", "info", "help", "version", "check"}
+        for index, mode in enumerate(modes):
+            if mode.name.lower() in safe:
+                return index
+        return 0
+
+    def _arg_row(self, spec: ir_mod.ArgSpec) -> QtWidgets.QWidget:
+        row = QtWidgets.QWidget()
+        grid = QtWidgets.QGridLayout(row)
+        grid.setContentsMargins(0, 2, 0, 2)
+        grid.setHorizontalSpacing(14)
+
+        field = QtWidgets.QLineEdit()
+        field.setPlaceholderText(spec.help or spec.name)
+        field.setToolTip(spec.help or f"positional {spec.index}")
+        self.args_fields[spec.name] = field
+
+        grid.addWidget(_label(spec.name, "key"), 0, 0)
+        grid.addWidget(field, 0, 1)
+        grid.setColumnStretch(1, 1)
+        return row
+
+    def _flag_block(self, flags) -> QtWidgets.QWidget:
+        holder = QtWidgets.QWidget()
+        grid = QtWidgets.QGridLayout(holder)
+        grid.setContentsMargins(0, 2, 0, 8)
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(4)
+
+        row = 0
+        for spec in flags:
+            label = spec.help or spec.long or spec.short
+            if spec.takes_value:
+                field = QtWidgets.QLineEdit()
+                field.setPlaceholderText(self.s.flag_value)
+                self.flag_fields[flag_token(spec)] = field
+                grid.addWidget(_label(label, "key"), row, 0)
+                grid.addWidget(field, row, 1)
+            else:
+                box = QtWidgets.QCheckBox(label)
+                self.flag_boxes[flag_token(spec)] = box
+                grid.addWidget(box, row, 0, 1, 2)
+            row += 1
+        grid.setColumnStretch(1, 1)
+        return holder
+
     def _row(self, site: ir_mod.PromptSite) -> QtWidgets.QWidget:
         row = QtWidgets.QWidget()
         grid = QtWidgets.QGridLayout(row)
@@ -507,11 +637,18 @@ class InterfacePanel(QtWidgets.QWidget):
             default_yes = yes_looks_default(site.prompt)
             widget.setCurrentIndex(0 if default_yes else 1)
         elif site.choices:
+            # Numbered, and the number is what gets sent.
+            #
+            # bash's `select` accepts the index but rejects the word on this
+            # build: `printf 'exploit\n' | bash menu.sh` re-prompts, while
+            # `printf '2\n'` matches. Sending the word therefore looks like the
+            # app ignoring you. The numbering also mirrors what the script
+            # prints, so the picker and the terminal show the same list.
             widget = QtWidgets.QComboBox()
-            for choice in site.choices:
-                widget.addItem(choice)
+            for number, choice in enumerate(site.choices, start=1):
+                widget.addItem(f"{number}   {choice}", str(number))
             if site.default and site.default not in site.choices:
-                widget.insertItem(0, site.default)
+                widget.insertItem(0, f"0   {site.default}", site.default)
         else:
             widget = QtWidgets.QLineEdit(site.default)
             widget.setPlaceholderText(site.default or site.var)
@@ -532,11 +669,41 @@ class InterfacePanel(QtWidgets.QWidget):
         self.s = s
         self._render()
 
+    def argv(self) -> list[str]:
+        """The command line this form describes.
+
+        Options come before positionals. bash getopts stops parsing at the first
+        non-option word, so `status -v -p 8443` silently drops both flags - the
+        run looked like it worked and every setting was ignored. argparse
+        accepts either order, so flags-first is safe for both.
+        """
+
+        out: list[str] = []
+        for key, box in self.flag_boxes.items():
+            if box.isChecked():
+                out.append(key)
+        for key, field in self.flag_fields.items():
+            text = field.text().strip()
+            if text:
+                out.extend([key, text])
+
+        if self.mode_picker is not None and self.mode_picker.count():
+            out.append(self.mode_picker.currentData())
+        for spec in self.script.positional_args if self.script else []:
+            value = self.args_fields.get(spec.name)
+            text = value.text().strip() if value is not None else ""
+            if text:
+                out.append(text)
+        return out
+
     def answers(self) -> dict[str, str]:
         out: dict[str, str] = {}
         for key, widget in self.inputs.items():
             if isinstance(widget, QtWidgets.QComboBox):
-                out[key] = widget.currentText().strip()
+                # currentData holds the literal to send: the index for a
+                # numbered menu, the value itself for a plain choices list.
+                data = widget.currentData()
+                out[key] = str(data) if data is not None else widget.currentText().strip()
             elif isinstance(widget, QtWidgets.QCheckBox):
                 out[key] = self.s.yes_short if widget.isChecked() else self.s.no_short
                 continue

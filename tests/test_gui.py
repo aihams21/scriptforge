@@ -519,3 +519,166 @@ def test_close_with_a_live_thread_does_not_abort(app, root):
     win.close()
     pump(40)
     assert win._thread is None
+
+
+# --- regression: a parametric script showed an empty interface -------------
+#
+# The form rendered prompt_sites only. An argparse or getopts tool has none, so
+# the panel said "this script has no built-in interface" while its modes, flags
+# and arguments were sitting in the IR the whole time. Nothing to pick from.
+
+def _param(tmp_path):
+    script = tmp_path / "getopts.sh"
+    script.write_text(
+        "#!/bin/bash\n"
+        'mode="${1:-status}"\n'
+        "while getopts \":hvp:\" opt; do\n"
+        "  case \"$opt\" in\n"
+        "    v) verbose=1 ;;\n"
+        "    p) port=$OPTARG ;;\n"
+        "    h) echo usage; exit 0 ;;\n"
+        "  esac\n"
+        "done\n"
+        'case "$mode" in\n'
+        "  start)  echo starting ;;\n"
+        "  stop)   echo stopping ;;\n"
+        "  status) echo \"port=$port verbose=$verbose\" ;;\n"
+        "esac\n"
+    )
+    script.chmod(0o755)
+    return script
+
+
+def test_parametric_script_renders_modes_and_flags(app, tmp_path):
+    from scriptforge.core.parser.classify import analyze
+    from scriptforge.gui.panels import InterfacePanel
+
+    script = _param(tmp_path)
+    panel = InterfacePanel(S.EN)
+    panel.set_script(analyze(script))
+
+    assert panel.mode_picker is not None, "no mode picker for a script with modes"
+    modes = [
+        panel.mode_picker.itemData(i) for i in range(panel.mode_picker.count())
+    ]
+    assert modes == ["start", "stop", "status"]
+
+    assert set(panel.flag_boxes) == {"-v", "-h"}
+    assert set(panel.flag_fields) == {"-p"}
+
+
+def test_flags_go_before_the_mode(app, tmp_path):
+    """bash getopts stops at the first non-option word.
+
+    `status -v -p 8443` parsed neither flag and the run looked successful with
+    every setting silently ignored.
+    """
+
+    from scriptforge.core.parser.classify import analyze
+    from scriptforge.gui.panels import InterfacePanel
+
+    panel = InterfacePanel(S.EN)
+    panel.set_script(analyze(_param(tmp_path)))
+    panel.flag_boxes["-v"].setChecked(True)
+    panel.flag_fields["-p"].setText("8443")
+
+    argv = panel.argv()
+    assert argv.index("-v") < argv.index("status"), argv
+    assert argv.index("-p") < argv.index("status"), argv
+    assert argv[-1] == "status"
+
+
+def test_flag_token_prefers_short_for_getopts(app, tmp_path):
+    """The parser fills long with the short letter for getopts ("--p"). Sending
+    that makes the script reject the line, so the short form is used."""
+
+    from scriptforge.gui.panels import flag_token
+    from scriptforge.core.parser.ir import FlagSpec
+
+    assert flag_token(FlagSpec(short="-p", long="--p")) == "-p"
+    assert flag_token(FlagSpec(short="-p", long="--ports")) == "--ports"
+
+
+def test_mode_picker_defaults_to_a_read_only_mode(app, tmp_path):
+    """Defaulting to the first mode meant the first click ran `start`. The
+    harmless mode is chosen instead when the script offers one."""
+
+    from scriptforge.core.parser.classify import analyze
+    from scriptforge.gui.panels import InterfacePanel
+
+    panel = InterfacePanel(S.EN)
+    panel.set_script(analyze(_param(tmp_path)))
+    assert panel.mode_picker.currentData() == "status"
+
+
+def test_numbered_menu_sends_the_index(app, tmp_path):
+    """bash's select accepts the index and rejects the word on this build, so
+    sending the word re-prompts forever and looks like the app ignoring you."""
+
+    script = tmp_path / "menu.sh"
+    script.write_text(
+        "#!/bin/bash\n"
+        "select choice in scan exploit quit; do\n"
+        '  case $choice in\n'
+        '    scan) echo scanning ;;\n'
+        '    exploit) echo exploiting ;;\n'
+        '    quit) echo bye; break ;;\n'
+        "  esac\n"
+        "done\n"
+    )
+    script.chmod(0o755)
+
+    from scriptforge.core.parser.classify import analyze
+    from scriptforge.gui.panels import InterfacePanel
+
+    panel = InterfacePanel(S.EN)
+    panel.set_script(analyze(script))
+    picker = panel.inputs["choice"]
+    assert [picker.itemText(i) for i in range(picker.count())] == [
+        "1   scan",
+        "2   exploit",
+        "3   quit",
+    ]
+    picker.setCurrentIndex(2)
+    assert panel.answers() == {"choice": "3"}
+
+
+def test_select_choices_drop_syntax_noise(tmp_path):
+    """Splitting the select line on `;` left `quit;` and `do` in the list."""
+
+    script = tmp_path / "menu.sh"
+    script.write_text(
+        "#!/bin/bash\nPS3=\"pick: \"\nselect choice in scan exploit quit; do\n  break\ndone\n"
+    )
+    script.chmod(0o755)
+
+    from scriptforge.core.parser.classify import analyze
+
+    ir = analyze(script)
+    assert ir.prompt_sites, "select produced no prompt"
+    assert ir.prompt_sites[0].choices == ["scan", "exploit", "quit"]
+
+
+def test_parametric_run_uses_pipes_not_a_pty(app, tmp_path):
+    """A script driven by argv does not read stdin; the prompt loop would sit
+    waiting for text that never comes."""
+
+    script = tmp_path / "echoer.sh"
+    script.write_text('#!/bin/bash\necho "args: $*"\n')
+    script.chmod(0o755)
+
+    from scriptforge.core.parser.classify import analyze
+    from scriptforge.core.runner import ScriptRunner
+
+    win = MainWindow(roots=[tmp_path], lang="en")
+    pump()
+    win.on_select(analyze(script))
+    pump()
+
+    # needs_pty is False for this one, so on_run picks run_plain. Assert that the
+    # transport it selects is the one that terminates.
+    assert win.current.needs_pty is False
+    result = ScriptRunner(script).run_plain(args=["one", "two"], on_output=None)
+    assert result.exit_code == 0
+    assert "one two" in result.output
+    win.close()

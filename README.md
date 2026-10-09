@@ -12,7 +12,7 @@ to document, and gives you a window instead of a prompt.**
 [![python](https://img.shields.io/badge/python-3.10%2B-58a6ff?style=flat-square)](https://www.python.org/downloads/)
 [![linux](https://img.shields.io/badge/linux-x86__64-f0a028?style=flat-square&logo=linux&logoColor=white)](https://github.com/aihams21/scriptforge/releases/latest)
 [![windows](https://img.shields.io/badge/windows-10%20%2F%2011-0078d4?style=flat-square&logo=windows&logoColor=white)](https://github.com/aihams21/scriptforge/releases/latest)
-[![tests](https://img.shields.io/badge/tests-91%20passing-3fb950?style=flat-square)](#tests)
+[![tests](https://img.shields.io/badge/tests-98%20passing-3fb950?style=flat-square)](#tests)
 [![licence-check](https://img.shields.io/badge/licence-MIT-green?style=flat-square)](LICENSE)
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/aihams21/scriptforge?quickstart=1)
@@ -326,6 +326,8 @@ The terminal UI stays because it is faster over SSH, where a GUI has no place.
 - **Arabic and English** from a toolbar button; Arabic switches the whole layout to RTL
 - **y/N prompts render as a choice** with the bracket default honoured (`[y/N]` starts at no)
 - **Optional fields fold away** so a 200-field script is not a wall of inputs
+- **Modes, arguments and flags are all rendered** — an `argparse` or `getopts` tool gets a picker, not an empty panel
+- **Numbered menus send the number**, which is what bash `select` actually accepts
 - **Four languages** parsed: bash, python, PowerShell, batch
 - **Live output** streamed into the window while a script runs
 - **Run history** in a local SQLite vault
@@ -347,7 +349,7 @@ The terminal UI stays because it is faster over SSH, where a GUI has no place.
 ## Tests
 
 ```
-91 passed
+98 passed
 ```
 
 The window is tested headless under `QT_QPA_PLATFORM=offscreen`, which is the

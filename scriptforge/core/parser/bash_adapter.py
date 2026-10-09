@@ -334,15 +334,50 @@ def _safe_lineno(node) -> int:
     return getattr(node, "lineno", 0) or 0
 
 
+SELECT_NOISE = {"do", "done", "esac", ";;", ";", "in", "esac)", "*"}
+
+
+def _select_words(node) -> list[str]:
+    """The choice list out of `select x in a b c; do`.
+
+    Reading the surrounding source lines produced entries like `quit;` and
+    `do`, because the list ends at the first `;` but the line scan had no idea
+    where it ended. The word nodes carry the list exactly.
+    """
+
+    parts = _words_of(node) if hasattr(node, "kind") else []
+    words: list[str] = []
+    seen_in = False
+    for part in parts:
+        raw = getattr(part, "word", None)
+        if raw is None:
+            continue
+        token = raw.strip("'\"")
+        if not seen_in:
+            if token == "in":
+                seen_in = True
+            continue
+        if token in SELECT_NOISE or token.endswith(";;"):
+            break
+        token = token.rstrip(";").strip()
+        if token:
+            words.append(token)
+    return words
+
+
 def _extract_select(node, ir: ScriptIR, lines: list[str]) -> None:
     """`select x in a b c; do` -> a CHOICE prompt."""
     line = _safe_lineno(node)
-    choices = _choices_from_surround(lines, line)
+    choices = _select_words(node) or _choices_from_surround(lines, line)
+    varname = "choice"
+    parts = _words_of(node) if hasattr(node, "kind") else []
+    if len(parts) > 1:
+        varname = getattr(parts[1], "word", "choice") or "choice"
     ir.prompt_sites.append(
         PromptSite(
             line=line,
-            prompt=humanize("choice"),
-            var="choice",
+            prompt=humanize(varname),
+            var=varname,
             widget=Widget.CHOICE,
             choices=choices,
         )
@@ -476,14 +511,22 @@ def _scan_bash(lines: list[str], ir: ScriptIR) -> None:
 
         m_sel = SELECT_RE.match(line)
         if m_sel:
-            choices = [c.strip("'\" ") for c in m_sel.group(2).split()]
+            varname, tail = m_sel.group(1), m_sel.group(2)
+            # The choice list ends at `; do`, not at the first `;`. Splitting on
+            # `;` alone left `quit;` and `do` in the list.
+            tail = re.split(r";\s*do\b", tail)[0]
+            words = [
+                w.strip("'\"")
+                for w in tail.split()
+                if w.strip("'\";") and w.strip("'\";") not in SELECT_NOISE
+            ]
             ir.prompt_sites.append(
                 PromptSite(
                     line=idx,
-                    prompt=humanize(m_sel.group(1)),
-                    var=m_sel.group(1),
+                    prompt=humanize(varname),
+                    var=varname,
                     widget=Widget.CHOICE,
-                    choices=choices,
+                    choices=words,
                 )
             )
             continue
@@ -509,16 +552,19 @@ def _scan_bash(lines: list[str], ir: ScriptIR) -> None:
                 m_c = CASE_LABEL_RE.match(line)
                 if m_c:
                     name, inline_help = m_c.group(1), m_c.group(2).strip()
-                    if name not in ("*", "esac", ";;") and inline_help and not NOT_A_COMMAND_RE.match(name):
+                    if (
+                        name not in ("*", "esac", ";;")
+                        and inline_help
+                        and not NOT_A_COMMAND_RE.match(name)
+                    ):
                         ir.subcommands.append(SubCommand(name=name, help=humanize(name)))
             continue
 
         m_open = CASE_OPEN_RE.match(line)
         if m_open:
             case_depth = 1
-            subject = m_open.group(1)
-            # Only a dispatcher on the positional argument names modes.
-            case_is_dispatch = _is_command_subject(subject, cmd_vars)
+            case_is_dispatch = _is_command_subject(m_open.group(1), cmd_vars)
+            continue
             continue
 
     # usage() blocks document subcommands as `name   description`
@@ -606,7 +652,7 @@ def _doc_comment(lines: list[str]) -> str:
 def _usage_from_heredoc(lines: list[str]) -> str:
     capture = False
     buf: list[str] = []
-    for line in lines:
+    for index, line in enumerate(lines):
         if re.search(r"<<\s*['\"]?USAGE", line, re.I):
             capture = True
             continue

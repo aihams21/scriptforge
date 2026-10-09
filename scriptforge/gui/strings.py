@@ -64,6 +64,10 @@ class Strings:
     field_size: str
     field_modified: str
     section_questions: str
+    section_modes: str
+    field_mode: str
+    pick_mode: str
+    flag_value: str
     section_args: str
     section_flags: str
     section_commands: str
@@ -76,6 +80,7 @@ class Strings:
     no_short: str
     answers_ready: str
     fill_optional_hint: str
+    pick_number_hint: str
     more_optional: str
     regenerating: str
     forged: str
@@ -128,6 +133,10 @@ EN = Strings(
     field_size="Size",
     field_modified="Modified",
     section_questions="Questions",
+    section_modes="Mode",
+    field_mode="mode",
+    pick_mode="Pick what this run does",
+    flag_value="value",
     section_args="Arguments",
     section_flags="Flags",
     section_commands="Sub-commands",
@@ -142,6 +151,7 @@ EN = Strings(
     no_short="n",
     answers_ready="answers ready",
     fill_optional_hint="Only the fields without a default are required. Press Run to accept the rest.",
+    pick_number_hint="The number is sent, the same way the script numbers the list.",
     more_optional="optional fields",
     regenerating="Building interface…",
     forged="Interface written",
@@ -187,6 +197,10 @@ AR = Strings(
     field_size="الحجم",
     field_modified="آخر تعديل",
     section_questions="الأسئلة",
+    section_modes="الوضع",
+    field_mode="الوضع",
+    pick_mode="اختار شو بدك يعمل",
+    flag_value="القيمة",
     section_args="المعاملات",
     section_flags="المفاتيح",
     section_commands="الأوامر",
@@ -201,6 +215,7 @@ AR = Strings(
     no_short="لا",
     answers_ready="الجاهز للإجابة",
     fill_optional_hint="الحقول اللي إلها قيمة افتراضية مش مطلوبة. اضغط «تشغيل» لباقيهم.",
+    pick_number_hint="الرقم هو اللي بينرسل، مثل ما السكربت بيرقم القايمة.",
     more_optional="حقول اختيارية",
     regenerating="جارٍ بناء الواجهة…",
     forged="تم كتابة الواجهة",

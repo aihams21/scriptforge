@@ -57,11 +57,20 @@ class RunWorker(QtCore.QObject):
     chunk = QtCore.Signal(str)
     done = QtCore.Signal(object)
 
-    def __init__(self, script: Path, answers: dict[str, str], timeout: int):
+    def __init__(
+        self,
+        script: Path,
+        answers: dict[str, str],
+        timeout: int,
+        argv: list[str] | None = None,
+        use_pty: bool = True,
+    ):
         super().__init__()
         self.script = script
         self.answers = answers
         self.timeout = timeout
+        self.argv = list(argv or [])
+        self.use_pty = use_pty
 
     @QtCore.Slot()
     def execute(self) -> None:
@@ -70,7 +79,13 @@ class RunWorker(QtCore.QObject):
         # on its first read.
         runner = ScriptRunner(self.script, answers=self.answers, timeout=self.timeout)
         try:
-            result = runner.run_interactive(on_output=self.chunk.emit)
+            # A script that takes a mode and flags does not read stdin, so the
+            # prompt-driven PTY loop is the wrong transport: it would wait for
+            # text that never comes. Pipes for those, pty for the rest.
+            if self.use_pty and not self.argv:
+                result = runner.run_interactive(on_output=self.chunk.emit)
+            else:
+                result = runner.run_plain(args=self.argv, on_output=self.chunk.emit)
         except Exception as exc:  # a dead child must surface, not vanish
             result = RunResult(
                 argv=[str(self.script)],
@@ -327,11 +342,17 @@ class MainWindow(QtWidgets.QMainWindow):
         answers = dict(self.interface.answers())
         answers.update(self._parse_console_answers())
 
+        argv = self.interface.argv()
+        # needs_pty is the parser's own verdict: an interactive script reads
+        # stdin, a parametric one parses argv. Trusting it keeps both fast.
+        use_pty = self.current.needs_pty and not argv
+
         script = self.current.path
         try:
-            # Main-thread fork. See the module docstring: this is what keeps the
-            # child from deadlocking under Qt's thread pool.
-            ScriptRunner(script, answers=answers).prepare()
+            if use_pty:
+                # Main-thread fork. See the module docstring: this is what keeps
+                # the child from deadlocking under Qt's thread pool.
+                ScriptRunner(script, answers=answers).prepare()
         except Exception as exc:
             self.statusBar().showMessage(f"fork failed: {exc}", 8000)
             return
@@ -342,7 +363,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.act_stop.setEnabled(True)
 
         self._thread = QtCore.QThread(self)
-        self._worker = RunWorker(script, answers, timeout=300)
+        self._worker = RunWorker(script, answers, 300, argv=argv, use_pty=use_pty)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.execute)
         self._worker.chunk.connect(self.run_panel.append)
