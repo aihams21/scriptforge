@@ -25,10 +25,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-pty = ["pexpect>=4.9"]
+dev = ["pytest>=8"]
 
 [project.scripts]
 scriptforge = "scriptforge.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["scriptforge*"]
+
