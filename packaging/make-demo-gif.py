@@ -73,7 +73,15 @@ def type_into(window, var: str, value) -> None:
     field = window.interface.inputs.get(var)
     if field is None:
         return
-    if isinstance(field, QtWidgets.QCheckBox):
+    # Combo (choices and y/N) vs line edit; the demo drives whichever the
+    # parser chose, exactly as a person would.
+    if isinstance(field, QtWidgets.QComboBox):
+        items = [field.itemText(i) for i in range(field.count())]
+        for candidate in (str(value), "y", "n"):
+            if candidate in items:
+                field.setCurrentIndex(items.index(candidate))
+                break
+    elif isinstance(field, QtWidgets.QCheckBox):
         field.setChecked(bool(value))
     else:
         field.setText(str(value))

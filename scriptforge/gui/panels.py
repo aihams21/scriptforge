@@ -10,6 +10,7 @@ label swap.
 from __future__ import annotations
 
 import datetime as dt
+import re
 from pathlib import Path
 
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -34,6 +35,43 @@ def fmt_size(n: int) -> str:
             return f"{value:.0f} {unit}" if unit == "B" else f"{value:.1f} {unit}"
         value /= 1024.0
     return f"{value:.1f} GB"
+
+
+YES_DEFAULT_RE = re.compile(r"\[\s*([yY])\s*/\s*([nN])\s*\]|\[\s*([nN])\s*/\s*([yY])\s*\]")
+
+
+# A prompt that offers a default is one the script can run without, which makes
+# it optional to fill in.
+DEFAULT_IN_PROMPT_RE = re.compile(r"\[([^\]]+)\]\s*:?\s*$")
+
+
+def _is_required(site: ir_mod.PromptSite) -> bool:
+    """Would the script stall if this were left blank?"""
+
+    if site.widget is ir_mod.Widget.CONFIRM:
+        return False
+    if site.default:
+        return False
+    if DEFAULT_IN_PROMPT_RE.search(site.prompt or ""):
+        return False
+    return True
+
+
+def yes_looks_default(prompt: str) -> bool:
+    """Read `[y/N]` out of the prompt text.
+
+    The convention is that the UPPERCASE letter is the default, so `[y/N]`
+    means "no unless told otherwise" and `[Y/n]` means yes. Reading the pair in
+    literal order instead made ScriptForge answer y to a question that had just
+    asked for n.
+    """
+
+    match = YES_DEFAULT_RE.search(prompt or "")
+    if not match:
+        return False
+    if match.group(1) is not None:  # [y/N]
+        return match.group(1) == "Y"
+    return match.group(4) == "Y"  # [n/Y]
 
 
 def _label(text: str, obj: str = "", wrap: bool = False) -> QtWidgets.QLabel:
@@ -416,8 +454,38 @@ class InterfacePanel(QtWidgets.QWidget):
             return
 
         self.body.addWidget(_label(f"{len(sites)} {s.section_questions.lower()}", "h1"))
+        self.body.addWidget(_label(s.fill_optional_hint, "faint", wrap=True))
+
+        self.rows: list[tuple[ir_mod.PromptSite, QtWidgets.QWidget, QtWidgets.QWidget]] = []
         for site in sites:
-            self.body.addWidget(self._row(site))
+            row = self._row(site)
+            self.body.addWidget(row)
+            self.rows.append((site, row, self.inputs[site.var]))
+
+        # Optional questions start collapsed. A 200-field script is unusable as a
+        # wall of inputs, and most runs only fill in the first three.
+        optional = [r for r in self.rows if not _is_required(r[0])]
+        for site, row, _ in optional:
+            row.setVisible(False)
+
+        if optional:
+            toggle = QtWidgets.QPushButton(f"+ {len(optional)}  {s.more_optional}")
+            # QPushButton is not checkable by default: setChecked() is a no-op
+            # and toggled never fires, so the button expanded nothing at all.
+            toggle.setCheckable(True)
+            toggle.setObjectName("link")
+            toggle.setCursor(QtCore.Qt.PointingHandCursor)
+            toggle.setFlat(True)
+
+            def _toggle(checked: bool, rows=optional, btn=toggle) -> None:
+                for _, row, _ in rows:
+                    row.setVisible(checked)
+                btn.setText(f"− {len(rows)}  {s.more_optional}" if checked else f"+ {len(rows)}  {s.more_optional}")
+
+            toggle.toggled.connect(_toggle)
+            self._toggle = toggle
+            self.body.addWidget(toggle)
+
         self.body.addStretch(1)
 
     def _row(self, site: ir_mod.PromptSite) -> QtWidgets.QWidget:
@@ -427,8 +495,17 @@ class InterfacePanel(QtWidgets.QWidget):
         grid.setHorizontalSpacing(14)
 
         lab = _label(site.prompt or site.var, "key")
-        if site.widget is ir_mod.Widget.CONFIRM:
-            widget = QtWidgets.QCheckBox(self.s.field_checkbox)
+
+        # A y/N prompt is a choice, not a toggle. A checkbox forces the user to
+        # know that "checked" means y and leaves no way to see what is selected;
+        # a combo showing y / n is self-explanatory and is what the shell prompt
+        # itself implies.
+        if site.widget is ir_mod.Widget.CONFIRM and not site.choices:
+            widget = QtWidgets.QComboBox()
+            yes, no = self.s.yes_short, self.s.no_short
+            widget.addItems([yes, no])
+            default_yes = yes_looks_default(site.prompt)
+            widget.setCurrentIndex(0 if default_yes else 1)
         elif site.choices:
             widget = QtWidgets.QComboBox()
             for choice in site.choices:
@@ -438,6 +515,7 @@ class InterfacePanel(QtWidgets.QWidget):
         else:
             widget = QtWidgets.QLineEdit(site.default)
             widget.setPlaceholderText(site.default or site.var)
+
         widget.setToolTip(f"{site.var}  ·  line {site.line}")
         self.inputs[site.var] = widget
 
@@ -460,9 +538,7 @@ class InterfacePanel(QtWidgets.QWidget):
             if isinstance(widget, QtWidgets.QComboBox):
                 out[key] = widget.currentText().strip()
             elif isinstance(widget, QtWidgets.QCheckBox):
-                # y/N is the convention in shell prompts, and an empty answer
-                # here would leave the child waiting on read() forever.
-                out[key] = "y" if widget.isChecked() else "n"
+                out[key] = self.s.yes_short if widget.isChecked() else self.s.no_short
                 continue
             else:
                 out[key] = widget.text()

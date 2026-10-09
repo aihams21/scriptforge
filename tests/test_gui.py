@@ -338,3 +338,184 @@ def test_confirm_field_always_carries_an_answer(window):
     assert panel.answers() == {"flag": "n"}
     checkbox.setChecked(True)
     assert panel.answers() == {"flag": "y"}
+
+
+# --- regression: Build interface hung, and the y/N box was unusable ----------
+
+def test_built_dir_is_a_default_root(app, tmp_path):
+    """Regression: on_forge appended the output folder to self.roots on every
+    click, so the root list grew without bound and each rescan re-walked one
+    more directory until the window looked frozen. It is a default root now.
+
+    Built with no explicit roots: passing roots replaces the defaults, and a
+    named root that does not exist is deliberately kept on the list so a wrong
+    path is visible rather than silently swapped for ~/bin.
+    """
+
+    from scriptforge.gui.main_window import DEFAULT_ROOTS, built_dir
+
+    assert built_dir() in DEFAULT_ROOTS
+
+    win = MainWindow(roots=[tmp_path], lang="en")
+    pump()
+    assert built_dir() in DEFAULT_ROOTS
+    win.close()
+
+
+def test_forge_click_does_not_grow_the_root_list(app, root):
+    from scriptforge.gui.main_window import MainWindow
+
+    win = MainWindow(roots=[root], lang="en")
+    pump()
+    before = len(win.roots)
+
+    for _ in range(3):
+        win.on_forge()
+        for _ in range(80):
+            if win._forge_thread is None:
+                break
+            pump(30)
+    pump()
+    assert len(win.roots) == before
+
+
+def test_forge_runs_off_the_gui_thread(app, root):
+    """An inline analyze+write froze the window, which is indistinguishable
+    from a crash for the person pressing the button."""
+
+    win = MainWindow(roots=[root], lang="en")
+    pump()
+    win.on_forge()
+    assert win._forge_thread is not None, "forge ran inline"
+    for _ in range(120):
+        if win._forge_thread is None:
+            break
+        pump(30)
+    assert win._forge_thread is None
+
+
+def test_build_button_is_disabled_for_unbuildable_scripts(app, root):
+    """An opaque entry point has nothing to generate; the button used to be
+    enabled and then report a failure that read like a bug.
+
+    Driven with a constructed IR rather than a real file: the unit here is the
+    button wiring, not the classifier's definition of opaque.
+    """
+
+    from scriptforge.core.parser.ir import Kind, Lang, ScriptIR
+
+    win = MainWindow(roots=[root], lang="en")
+    pump()
+
+    opaque = ScriptIR(
+        path=root / "wrapper.sh", kind=Kind.OPAQUE, lang=Lang.BASH
+    )
+    win.on_select(opaque)
+    pump()
+    assert opaque.buildable is False
+    assert not win.act_forge.isEnabled()
+    assert win.act_forge.toolTip(), "no explanation offered for a disabled button"
+
+    # And it comes back when a buildable script is selected.
+    win.on_select(win.sidebar.irs[0])
+    pump()
+    assert win.act_forge.isEnabled()
+    win.close()
+
+
+def test_confirm_renders_as_a_choice_not_a_toggle(app, root, tmp_path):
+    """A y/N prompt is a choice. A checkbox forced the user to know that
+    checked means y, with no way to see which was selected."""
+
+    from scriptforge.core.parser.classify import analyze
+    from scriptforge.gui.panels import InterfacePanel
+
+    script = tmp_path / "yn.sh"
+    script.write_text('#!/bin/bash\nread -rp "continue? [y/N] " go\necho "$go"\n')
+    script.chmod(0o755)
+
+    panel = InterfacePanel(S.EN)
+    panel.set_script(analyze(script))
+    widget = panel.inputs["go"]
+    assert isinstance(widget, QtWidgets.QComboBox)
+    assert widget.count() == 2
+
+
+def test_bracket_default_is_read_from_the_prompt():
+    """`[y/N]` means n is the default; the uppercase letter marks it. Reading
+    the pair in literal order answered y to a question that asked for n."""
+
+    from scriptforge.gui.panels import yes_looks_default
+
+    assert yes_looks_default("[y/N]? ") is False
+    assert yes_looks_default("[Y/n]? ") is True
+    assert yes_looks_default("[Y/N]? ") is True
+    assert yes_looks_default("[n/y]? ") is False
+    assert yes_looks_default("continue? ") is False
+
+
+def test_prompts_with_a_default_are_optional(app, root):
+    """A field the script supplies a default for is one the user can skip; a
+    200-field script as a wall of inputs is unusable."""
+
+    win = MainWindow(roots=[root], lang="en")
+    pump()
+    for row in range(win.sidebar.list.count()):
+        name = win.sidebar.irs[win.sidebar.list.item(row).data(QtCore.Qt.UserRole + 4)].path.name
+        if name == "ask.sh":
+            win.sidebar.list.setCurrentRow(row)
+            break
+    pump()
+
+    panel = win.interface
+    # isVisibleTo, not isVisible: the panel lives in a tab that is not the
+    # current one, so isVisible() reports False for rows that are shown.
+    shown = [row for _, row, _ in panel.rows if row.isVisibleTo(panel)]
+    folded = [row for _, row, _ in panel.rows if not row.isVisibleTo(panel)]
+    # ask.sh has one prompt with no default, so it stays shown; nothing to fold.
+    assert len(shown) == 1 and not folded
+    win.close()
+
+
+def test_optional_toggle_expands_and_collapses(app, tmp_path):
+    """Required fields stay open, fields with a default fold away, and the
+    toggle puts them back."""
+
+    from scriptforge.core.parser.ir import Kind, PromptSite, ScriptIR, Widget
+    from scriptforge.gui.panels import InterfacePanel
+
+    panel = InterfacePanel(S.EN)
+    panel.resize(600, 400)
+
+    ir = ScriptIR(path=tmp_path / "mix.sh", kind=Kind.INTERACTIVE)
+    ir.prompt_sites = [
+        PromptSite(line=1, prompt="target host: ", var="host", widget=Widget.TEXT),
+        PromptSite(line=2, prompt="port [443]: ", var="port", widget=Widget.TEXT),
+        PromptSite(line=3, prompt="continue? [y/N] ", var="go", widget=Widget.CONFIRM),
+    ]
+    panel.set_script(ir)
+    pump(10)
+
+    shown = [r for _, r, _ in panel.rows if r.isVisibleTo(panel)]
+    folded = [r for _, r, _ in panel.rows if not r.isVisibleTo(panel)]
+    assert len(shown) == 1, "a prompt with no default must stay open"
+    assert len(folded) == 2
+
+    toggle = panel._toggle
+    toggle.setChecked(True)
+    pump(10)
+    assert all(r.isVisibleTo(panel) for r in folded)
+
+    toggle.setChecked(False)
+    pump(10)
+    assert not any(r.isVisibleTo(panel) for r in folded)
+
+
+def test_close_with_a_live_thread_does_not_abort(app, root):
+    """QThread destroyed at teardown aborts the interpreter."""
+
+    win = MainWindow(roots=[root], lang="en")
+    pump()
+    win.close()
+    pump(40)
+    assert win._thread is None

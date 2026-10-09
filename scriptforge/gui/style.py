@@ -154,6 +154,16 @@ def stylesheet() -> str:
     QLabel#err    {{ color: {S.ERR}; font-weight: 600; }}
     QLabel#warn   {{ color: {S.WARN}; font-weight: 600; }}
 
+    QPushButton#link {{
+        background: transparent;
+        border: none;
+        color: {S.ACCENT};
+        padding: 4px 2px;
+        text-align: left;
+        font-size: 12px;
+    }}
+    QPushButton#link:hover {{ color: #ffc06a; text-decoration: underline; }}
+
     QProgressBar {{
         border: 1px solid {S.BORDER};
         border-radius: 5px;

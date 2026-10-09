@@ -72,10 +72,16 @@ class Strings:
     no_fields: str
     no_fields_hint: str
     field_checkbox: str
+    yes_short: str
+    no_short: str
     answers_ready: str
+    fill_optional_hint: str
+    more_optional: str
     regenerating: str
     forged: str
     forge_failed: str
+    not_buildable: str
+    reused: str
     # run
     console_empty: str
     running: str
@@ -132,10 +138,16 @@ EN = Strings(
         "and flags. Build an interface to wrap it in a menu."
     ),
     field_checkbox="use this script",
+    yes_short="y",
+    no_short="n",
     answers_ready="answers ready",
+    fill_optional_hint="Only the fields without a default are required. Press Run to accept the rest.",
+    more_optional="optional fields",
     regenerating="Building interface…",
     forged="Interface written",
     forge_failed="Build failed",
+    reused="Up to date",
+    not_buildable="This script delegates elsewhere — there is no interface to build.",
     console_empty="Output appears here.",
     running="running…",
     finished="finished",
@@ -185,10 +197,16 @@ AR = Strings(
         "ابنِ واجهة لتحوّله إلى قائمة."
     ),
     field_checkbox="استخدم هذا السكربت",
+    yes_short="نعم",
+    no_short="لا",
     answers_ready="الجاهز للإجابة",
+    fill_optional_hint="الحقول اللي إلها قيمة افتراضية مش مطلوبة. اضغط «تشغيل» لباقيهم.",
+    more_optional="حقول اختيارية",
     regenerating="جارٍ بناء الواجهة…",
     forged="تم كتابة الواجهة",
     forge_failed="فشل البناء",
+    reused="محدّث",
+    not_buildable="هذا السكربت بيفوّض شغله لبرنامج تاني — ما فيه واجهة نبنيها.",
     console_empty="المخرجات بتظهر هون.",
     running="شغّال…",
     finished="خلص",

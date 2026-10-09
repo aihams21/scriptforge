@@ -26,7 +26,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from .. import __version__
 from ..core.parser.classify import analyze, scan_directory
 from ..core.runner import RunResult, ScriptRunner
-from ..forge import forge
+from ..forge import built_dir, forge
 from . import strings as S
 from .panels import HistoryPanel, InterfacePanel, OverviewPanel, RunPanel, ScriptList
 from .style import stylesheet
@@ -34,6 +34,10 @@ from .style import stylesheet
 DEFAULT_ROOTS = [
     Path.home() / "bin",
     Path.home() / ".local" / "bin",
+    # Forge output is scanned from the start. Appending it on every Build click
+    # grew the root list without bound, and each rescan then re-walked one more
+    # directory - the window got slower on every press until it looked hung.
+    built_dir(),
     Path("/usr/local/bin"),
     Path("/usr/bin"),
 ]
@@ -77,6 +81,28 @@ class RunWorker(QtCore.QObject):
         self.done.emit(result)
 
 
+class ForgeWorker(QtCore.QObject):
+    """Builds a wrapper on a worker thread."""
+
+    done = QtCore.Signal(object)  # RewriteResult
+
+    def __init__(self, script: Path, force: bool):
+        super().__init__()
+        self.script = script
+        self.force = force
+
+    @QtCore.Slot()
+    def execute(self) -> None:
+        from ..core.rewriter import RewriteResult
+
+        try:
+            self.done.emit(forge(self.script, force=self.force))
+        except Exception as exc:  # noqa: BLE001
+            self.done.emit(
+                RewriteResult(self.script, self.script, False, "error", str(exc), [])
+            )
+
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, roots: list[Path] | None = None, lang: str = "en"):
         super().__init__()
@@ -90,6 +116,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.current = None
         self._thread: QtCore.QThread | None = None
         self._worker: RunWorker | None = None
+        self._forge_thread: QtCore.QThread | None = None
+        self._forge_worker: ForgeWorker | None = None
 
         self.setWindowTitle(f"ScriptForge {__version__}")
         self.resize(1180, 720)
@@ -205,27 +233,92 @@ class MainWindow(QtWidgets.QMainWindow):
         self.overview.set_script(script)
         self.interface.set_script(script)
         self.act_run.setEnabled(script is not None)
-        self.act_forge.setEnabled(script is not None)
+        # Disabled with a tooltip rather than enabled-then-failed: an opaque
+        # entry point has nothing to generate, and the error message read like
+        # something had broken.
+        self.act_forge.setEnabled(script is not None and script.buildable)
+        self.act_forge.setToolTip(
+            "" if script is None or script.buildable else self.s.not_buildable
+        )
 
     # --- forge -------------------------------------------------------------
     def on_forge(self) -> None:
-        if self.current is None:
+        """Build an interface for a script that has none.
+
+        Runs on a worker: analyze + write is milliseconds for a normal script
+        but can be seconds for a generated one, and doing it inline froze the
+        window, which the user cannot tell apart from a crash.
+        """
+
+        if self.current is None or self._forge_thread is not None:
             return
-        try:
-            result = forge(self.current.path, force=True)
-        except Exception as exc:
-            self.statusBar().showMessage(f"{self.s.forge_failed}: {exc}", 8000)
+
+        ir = self.current
+        if not ir.buildable:
+            self.statusBar().showMessage(self.s.not_buildable, 9000)
             return
-        if result.ok:
-            self.statusBar().showMessage(f"{self.s.forged}: {result.generated}", 8000)
-            # The wrapper is now a script in its own right; make it selectable.
+
+        # Rebuild only when the source moved on.
+        #
+        # A modal confirm was the wrong shape twice over: it is a decision the
+        # user cannot answer without reading, and a box nobody dismisses is
+        # indistinguishable from the hang this path already had.
+        force = self._wrapper_is_stale(ir)
+
+        self.act_forge.setEnabled(False)
+        self.statusBar().showMessage(self.s.regenerating)
+
+        self._forge_thread = QtCore.QThread(self)
+        self._forge_worker = ForgeWorker(ir.path, force)
+        self._forge_worker.moveToThread(self._forge_thread)
+        self._forge_thread.started.connect(self._forge_worker.execute)
+        self._forge_worker.done.connect(self._forge_done)
+        self._forge_thread.start()
+
+    def _wrapper_is_stale(self, ir) -> bool:
+        """True when the source is newer than the wrapper generated from it.
+
+        No wrapper yet means rewrite() builds one without needing force.
+        """
+
+        newest = 0.0
+        for candidate in built_dir().glob(f"{ir.path.stem}.*"):
             try:
-                self.roots.append(result.generated.parent)
-            except Exception:
-                pass
+                newest = max(newest, candidate.stat().st_mtime)
+            except OSError:
+                continue
+        if newest == 0.0:
+            return False
+        try:
+            return ir.path.stat().st_mtime > newest
+        except OSError:
+            return False
+
+    def _forge_done(self, result) -> None:
+        if self._forge_thread is not None:
+            self._forge_thread.quit()
+            self._forge_thread.wait(5000)
+            self._forge_thread = None
+        self._forge_worker = None
+        self.act_forge.setEnabled(self.current is not None and self.current.buildable)
+
+        if result.ok:
+            fresh = "wrote" in result.message
+            head = self.s.forged if fresh else self.s.reused
+            self.statusBar().showMessage(f"{head}: {result.generated}", 10000)
             self.rescan()
+            # Select the wrapper so the next Run acts on it, not the original.
+            self._select_by_path(result.generated)
         else:
-            self.statusBar().showMessage(f"{self.s.forge_failed}: {result.message}", 8000)
+            self.statusBar().showMessage(f"{self.s.forge_failed}: {result.message}", 12000)
+
+    def _select_by_path(self, path: Path) -> None:
+        target = str(path)
+        for row in range(self.sidebar.list.count()):
+            entry = self.sidebar.list.item(row)
+            if entry.data(QtCore.Qt.UserRole) == target:
+                self.sidebar.list.setCurrentRow(row)
+                return
 
     # --- run ---------------------------------------------------------------
     def on_run(self) -> None:
@@ -335,9 +428,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.statusBar().showMessage(self.s.ready, 2500)
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
-        if self._thread is not None:
-            self._thread.quit()
-            self._thread.wait(2000)
+        # A live QThread aborts the interpreter at teardown, which is the crash
+        # this whole class of bug produced before.
+        for attr in ("_thread", "_forge_thread"):
+            thread = getattr(self, attr, None)
+            if thread is not None:
+                thread.quit()
+                thread.wait(3000)
+                setattr(self, attr, None)
         super().closeEvent(event)
 
 

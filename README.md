@@ -324,6 +324,8 @@ The terminal UI stays because it is faster over SSH, where a GUI has no place.
 
 - **Desktop window** on Linux and Windows 11 from one code path
 - **Arabic and English** from a toolbar button; Arabic switches the whole layout to RTL
+- **y/N prompts render as a choice** with the bracket default honoured (`[y/N]` starts at no)
+- **Optional fields fold away** so a 200-field script is not a wall of inputs
 - **Four languages** parsed: bash, python, PowerShell, batch
 - **Live output** streamed into the window while a script runs
 - **Run history** in a local SQLite vault
@@ -345,7 +347,7 @@ The terminal UI stays because it is faster over SSH, where a GUI has no place.
 ## Tests
 
 ```
-82 passed
+91 passed
 ```
 
 The window is tested headless under `QT_QPA_PLATFORM=offscreen`, which is the
