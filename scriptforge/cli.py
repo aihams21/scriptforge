@@ -24,9 +24,9 @@ def _print_usage() -> None:
   {theme.version_line()}
 
 USAGE
-  scriptforge                    launch the TUI (default)
-  scriptforge ui                 same, explicitly
-  scriptforge gui                open the browser GUI (mouse-driven)
+  scriptforge                    launch the desktop window (default)
+  scriptforge gui [--lang ar]    same, with an explicit language
+  scriptforge tui                terminal interface
   scriptforge inspect <script>   show the recovered interface
   scriptforge plan <script>      show what forging would do
   scriptforge forge <script>     re-program a UI-less script
@@ -74,10 +74,50 @@ def _parse_kv(items: list[str]) -> dict[str, str]:
     return out
 
 
+def _launch_desktop(rest: list[str]) -> int:
+    """Start the Qt window.
+
+    The default command is the desktop app, so a double-click on the icon lands
+    on the GUI. A missing Qt is reported as an install instruction rather than a
+    traceback, because that is what a launcher without a TTY actually shows the
+    user.
+    """
+
+    lang = "en"
+    roots: list[Path] = []
+    for arg in rest:
+        if arg.startswith("--lang="):
+            lang = arg.split("=", 1)[1]
+        elif arg in ("--lang", "--language"):
+            continue
+        elif not arg.startswith("-"):
+            roots.append(Path(arg))
+    if rest and rest[0] in ("--lang", "--language"):
+        idx = rest.index(rest[0])
+        if idx + 1 < len(rest):
+            lang = rest[idx + 1]
+
+    try:
+        from .gui.main_window import run as run_desktop
+    except ImportError as exc:
+        print(
+            "  The desktop window needs PySide6, which is not installed.\n\n"
+            "    Linux    pip install PySide6\n"
+            "    Windows  py -m pip install PySide6\n\n"
+            f"  (import failed: {exc})",
+            file=sys.stderr,
+        )
+        return 2
+    return run_desktop([str(r) for r in roots] + ["--lang", lang])
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(argv if argv is not None else sys.argv[1:])
 
-    if not argv or argv[0] in ("-h", "--help", "help"):
+    if not argv:
+        return _launch_desktop([])
+
+    if argv[0] in ("-h", "--help", "help"):
         _print_usage()
         return 0
 
@@ -87,29 +127,15 @@ def main(argv: list[str] | None = None) -> int:
 
     cmd, rest = argv[0], argv[1:]
 
-    if cmd in ("ui", "tui"):
+    if cmd in ("ui", "tui", "term"):
         from .ui.app import ScriptForge
 
-        roots = [Path(a) for a in rest] or None
+        roots = [Path(a) for a in rest if not a.startswith("-")] or None
         ScriptForge(roots=roots).run()
         return 0
 
-    if cmd in ("gui", "web"):
-        from .web import serve
-
-        roots = [Path(a) for a in rest] or None
-        host, port, server = serve(roots=roots, open_browser="--no-open" not in rest)
-        print(f"  {theme.version_line()}")
-        print(f"  GUI   http://{host}:{port}/")
-        print("  Ctrl+C to stop.")
-        try:
-            server.serve_forever()
-        except KeyboardInterrupt:
-            print("\n  stopped.")
-        finally:
-            server.shutdown()
-            server.server_close()
-        return 0
+    if cmd in ("gui", "app", "desktop"):
+        return _launch_desktop(rest)
 
     if cmd == "inspect":
         if not rest:

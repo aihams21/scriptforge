@@ -208,6 +208,7 @@ class ScriptRunner:
         prompt_re = re.compile(r"[^\n]*[:?]\s*\Z")
         timed_out = False
         idle_ticks = 0
+        eof_sent = False
 
         try:
             while child.isalive():
@@ -222,7 +223,10 @@ class ScriptRunner:
                     if not child.isalive():
                         break
 
-                chunk = child.before or ""
+                # prompt_re matches to the end of the buffer, so the matched
+                # text lands in `after` and `before` is empty. Capturing only
+                # `before` is why the prompt never showed up in the console.
+                chunk = (child.before or "") if idx != 0 else (child.before or "") + (child.after or "")
                 if chunk and idx != 2:
                     # On a timeout tick `before` still holds unconsumed data,
                     # so capturing there would duplicate output.
@@ -232,16 +236,48 @@ class ScriptRunner:
                 if idx == 1:  # EOF
                     break
 
-                if not queue:
-                    # Nothing left to give; keep draining until the child ends.
+                if idx == 0:
+                    # A prompt is on screen. Answer it if we have something left,
+                    # otherwise hand it EOF.
+                    #
+                    # EOF has to be re-sent per prompt: Ctrl-D only closes a read
+                    # while the input buffer is empty, so a script with three
+                    # prompts and no answers needs three of them. Sending one
+                    # left the child blocked in read() until the run timeout.
+                    if queue:
+                        child.sendline(queue.pop(0))
+                        idle_ticks = 0
+                    else:
+                        # Deliberately not latched by eof_sent: Ctrl-D only closes
+                        # a read while the input buffer is empty, so every
+                        # unanswered prompt needs its own. Latching it left the
+                        # second prompt of a no-answer script blocking until the
+                        # run timeout.
+                        #
+                        # The method is `sendeof`, not `seteof`; the wrong name
+                        # raises AttributeError and a blanket except would
+                        # swallow it.
+                        for send_eof in (
+                            lambda: child.sendeof(),
+                            lambda: child.sendcontrol("d"),
+                        ):
+                            try:
+                                send_eof()
+                                break
+                            except Exception:  # noqa: BLE001
+                                continue
+                elif not queue:
+                    # Nothing left to give and no prompt in sight: close stdin
+                    # once so a script blocked on an unmarked read also ends.
+                    if idx == 2 and not eof_sent:
+                        eof_sent = True
+                        try:
+                            child.sendeof()
+                        except Exception:  # noqa: BLE001
+                            pass
                     if idx == 2 and not child.isalive():
                         break
                     continue
-
-                if idx == 0:
-                    # A textual prompt appeared - answer it now.
-                    child.sendline(queue.pop(0))
-                    idle_ticks = 0
                 else:
                     # No marker (plain `read -r x` prints nothing). Treat two
                     # consecutive idle ticks as "the script is waiting on me".

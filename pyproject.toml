@@ -19,17 +19,23 @@ classifiers = [
   "Topic :: Security",
 ]
 dependencies = [
-  "pexpect>=4.9",
+  "pexpect>=4.9; sys_platform != 'win32'",
   "bashlex>=0.18",
   "textual>=0.60",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+# The desktop window. Optional so a headless box can install the CLI and the
+# terminal UI without pulling ~150 MB of Qt.
+gui = ["PySide6>=6.6"]
+dev = ["pytest>=8", "PySide6>=6.6"]
 
 [project.scripts]
 scriptforge = "scriptforge.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["scriptforge*"]
+
+[tool.setuptools.package-data]
+scriptforge = ["assets/*.png", "assets/*.svg", "assets/*.ico"]
 

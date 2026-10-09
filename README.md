@@ -1,365 +1,380 @@
-# ScriptForge
-
-**أي سكربت ← تطبيق بإيدك.**
-
 <div align="center">
 
-![ScriptForge](packaging/icon/scriptforge-256.png)
+<img src="docs/banner.svg" alt="ScriptForge" width="820">
 
-**ScriptForge** — read any bash / python / PowerShell script, understand the
-interface hiding inside it, and build a screen you can actually navigate.
-If the script has **no interface at all**, ScriptForge re-programs it and
-gives it one.
+# ScriptForge
 
-Runs *inside* your Linux distro — Kali bare-metal **or** Kali in VirtualBox.
-Same package, same command, same look.
+**Point it at a shell script. It reads the questions the script was never told
+to document, and gives you a window instead of a prompt.**
 
-**Two interfaces:** a terminal TUI, and a browser GUI you drive with the mouse.
-Same engine behind both.
+[![release](https://img.shields.io/github/v/release/aihams21/scriptforge?style=flat-square&label=release)](https://github.com/aihams21/scriptforge/releases/latest)
+[![licence](https://img.shields.io/badge/licence-MIT-f0a028?style=flat-square)](#licence)
+[![python](https://img.shields.io/badge/python-3.10%2B-58a6ff?style=flat-square)](https://www.python.org/downloads/)
+[![linux](https://img.shields.io/badge/linux-x86__64-f0a028?style=flat-square&logo=linux&logoColor=white)](https://github.com/aihams21/scriptforge/releases/latest)
+[![windows](https://img.shields.io/badge/windows-10%20%2F%2011-0078d4?style=flat-square&logo=windows&logoColor=white)](https://github.com/aihams21/scriptforge/releases/latest)
+[![tests](https://img.shields.io/badge/tests-76%20passing-3fb950?style=flat-square)](#tests)
+[![licence-check](https://img.shields.io/badge/licence-MIT-green?style=flat-square)](LICENSE)
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/aihams21/scriptforge?quickstart=1)
+[![Fork](https://img.shields.io/github/forks/aihams21/scriptforge?style=flat-square&label=forks)](https://github.com/aihams21/scriptforge/network/members)
+[![stars](https://img.shields.io/github/stars/aihams21/scriptforge?style=flat-square&label=stars)](https://github.com/aihams21/scriptforge/stargazers)
 
 </div>
 
-```
-   ___  _____ ____ _   _  _____
-  / __||  _  |_   _| | | ||  ___|   any script -> a real app
-  \__ \ | |__  | | | |_| || |_      _   _    | |   ____ ___
-  |___/ |____| |_|  \__, |___|     | |_| |   | |  / __|  _ \
-                          |___/     \__, |   | | | (__| | | |
-   _   _   ___  ____ _    _____      __/ |   |_|  \___|_| |_|
-  | | | | / _ \|  _ \ |  |_   _|    /____/
-  | |_| || | | | |_) || | | | |    scriptforge v0.1.0
-  |  _  || |_| |  _ < | | | | |           by AIHAM AM
-  |_| |_| \___/|_| \_\|_| |_| |_|          bash + python + powershell
-```
+<div align="center">
+
+### Download
+
+[![Linux — ScriptForge-linux.tar.gz](https://img.shields.io/badge/%F0%9F%94%A5%20Linux-ScriptForge--linux.tar.gz-f0a028?style=for-the-badge)](https://github.com/aihams21/scriptforge/releases/latest/download/ScriptForge-linux.tar.gz)
+[![Windows — ScriptForge-windows.zip](https://img.shields.io/badge/%F0%9F%94%A5%20Windows-ScriptForge--windows.zip-0078d4?style=for-the-badge)](https://github.com/aihams21/scriptforge/releases/latest/download/ScriptForge-windows.zip)
+[![Source (all platforms)](https://img.shields.io/badge/%F0%9F%93%A6%20Source-2.4MB-8b93a5?style=for-the-badge)](https://github.com/aihams21/scriptforge/releases/latest)
+
+`v0.1.0` · no account, no telemetry, no network calls
+
+</div>
 
 ---
 
-## Table of contents
+## Install
 
-- [What it does](#what-it-does)
-- [Install — Kali Linux / any Linux](#install--kali-linux--any-linux)
-- [Install — Windows 10 / 11](#install--windows-10--11)
-- [Usage](#usage)
-- [How it works](#how-it-works)
-- [Re-programming, with a real example](#re-programming-with-a-real-example)
-- [Honest limitations](#honest-limits)
-- [Development](#development)
-- [License](#license)
+<details open>
+<summary><b>Linux — one line</b></summary>
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aihams21/scriptforge/main/install.sh | bash
+```
+
+Installs the Qt/xcb runtime through `apt`, builds a virtualenv under
+`~/.local/share/scriptforge`, links `scriptforge` into `~/.local/bin`, adds a
+desktop icon and runs a self-test. Re-running it is safe.
+
+Add `--gui` if the window is the only thing you want (skips the terminal UI
+dependencies):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aihams21/scriptforge/main/install.sh | bash -s -- --gui
+```
+
+</details>
+
+<details>
+<summary><b>Windows 11 — one line</b></summary>
+
+Open PowerShell (**not** cmd) and paste:
+
+```powershell
+iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/aihams21/scriptforge/main/install.ps1'))
+```
+
+Creates an isolated venv under `%LOCALAPPDATA%\ScriptForge`, installs the
+package, writes Start-menu and Desktop shortcuts, self-tests, and opens the
+window.
+
+</details>
+
+<details>
+<summary><b>From the downloaded archive</b></summary>
+
+```bash
+tar -xzf ScriptForge-linux.tar.gz && cd ScriptForge-linux && ./install.sh --gui
+```
+
+```powershell
+Expand-Archive .\ScriptForge-windows.zip; cd .\ScriptForge-windows; .\install.ps1
+```
+
+</details>
+
+<details>
+<summary><b>Try it without installing</b></summary>
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/aihams21/scriptforge?quickstart=1)
+
+The devcontainer provisions the venv, the Qt libraries and an X virtual frame.
+In an X11-capable workspace the window runs under `xvfb-run -a .venv/bin/python
+-m scriptforge.cli gui`.
+
+</details>
 
 ---
 
 ## What it does
 
-Pick a file. ScriptForge works out its shape and builds the right screen:
-
-| Detected kind | What triggers it | What you get |
-|---|---|---|
-| `interactive` | `read`, `select`, `input()`, `Read-Host`, `set /p` | a **form**, one widget per question; answers are injected live over a PTY |
-| `parametric` | `case $1`, `argparse`, `usage()` blocks, `param()`, `%1..%9` | a **menu** of modes + a field per argument |
-| `skeletal` | no interface at all (usually a 3-line wrapper) | **re-programmed** into an interactive wrapper |
-| `fullscreen` | curses apps (`htop`, `vim`) | the raw terminal, embedded |
-| `opaque` | package console-scripts that delegate elsewhere | launched with free-form args |
-
-Two extras:
-
-- **History** — every run is recorded (command, answers, exit code, duration).
-- **Non-destructive** — your original scripts are *never* modified. Generated
-  wrappers go to `~/.scriptforge/built/`.
-
----
-
-## Install — Kali Linux / any Linux
-
-### Requirements
-
-| | |
-|---|---|
-| OS | Linux (Kali recommended) |
-| Python | **3.10+** |
-| Network | only for the first install; after that it works fully offline |
-
-### One command
+A script with no help text is still a program with an interface — it just hides
+it in `read` statements. ScriptForge recovers that interface and builds a
+window around it.
 
 ```bash
-git clone https://github.com/aihams21/scriptforge.git
-cd scriptforge
-chmod +x install.sh
-./install.sh
+#!/bin/bash
+echo "== netcheck =="
+read -rp "target host: " host
+read -rp "port [443]: " port
+read -rp "resolve DNS first? [y/N] " dns
+echo "connecting to $host:$port"
 ```
 
-The installer creates a private virtualenv, installs the dependencies,
-**runs a self-test**, and prints the exact command to launch.
-
-### Add the icon (Desktop + application menu)
-
-```bash
-./install.sh --desktop
+```
+┌─ ScriptForge ───────────────────────────────────────────┐
+│ ▸ port-check.sh              interactive                │
+├──────────────────────┬──────────────────────────────────┤
+│  target host:        │  [ 10.0.0.5                  ]  │
+│  port [443]:         │  [ 8443                       ]  │
+│  resolve DNS [y/N]:  │  [x] use this script            │
+├──────────────────────┴──────────────────────────────────┤
+│ == netcheck ==                                          │
+│ target host: port [443]: unusual port                   │
+│ connecting to 10.0.0.5:8443                             │
+│ finished · 0 · 1.1s                                     │
+└─────────────────────────────────────────────────────────┘
 ```
 
-That installs:
+The original file is never modified. Forged wrappers, when needed, land in
+`~/.scriptforge/built/`.
 
-- the icon at all 8 standard sizes (`16` … `512`) plus a scalable SVG
-- an application-menu entry named **ScriptForge**
-- a launcher on your **Desktop**, pre-marked as trusted
+<details>
+<summary><b>The demo, end to end (11 s)</b></summary>
 
-Remove it again:
+<img src="docs/demo.gif" alt="ScriptForge turning a raw script into a form" width="820">
 
-```bash
-./packaging/linux/install-desktop.sh --uninstall
-```
+Recorded from the real window by `packaging/make-demo-gif.py`, so it cannot drift
+from what the app does.
 
-#### Launch — pick your interface
-
-```bash
-scriptforge gui                    # browser GUI, mouse-driven
-scriptforge                        # terminal UI
-```
-
-`gui` starts a local server on `127.0.0.1` and opens your browser. Nothing is
-exposed beyond loopback and no data leaves the machine.
-
-### Desktop entries
-
-`./install.sh --desktop` creates **two** launchers:
-
-| Entry | What it opens |
-|---|---|
-| **ScriptForge** | the terminal interface |
-| **ScriptForge GUI** | the browser interface |
-
-### Keys in the terminal UI
-
-| Key | Action |
-|---|---|
-| `↑` `↓` | move between scripts (the right pane updates live) |
-| `/` | search |
-| `Enter` | open the generated interface, or run it |
-| `r` | rescan |
-| `q` | quit (only from the main screen — never from a dialog) |
-| `Esc` | cancel / close the current dialog |
-
-Keypresses inside a dialog never fall through to the app, so nothing closes
-underneath you.
-
-> **Note on Kali's PEP 668.** Kali marks Python as externally managed, so a bare
-> `pip install` may refuse. `install.sh` uses a venv, which sidesteps it entirely.
-
-### Manual install
-
-```bash
-cd scriptforge
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-scriptforge
-```
-
----
-
-## Install — Windows 10 / 11
-
-Windows users get a native build that drives **PowerShell** (`.ps1`),
-**batch** (`.bat` / `.cmd`) and **Python** scripts.
-
-### One command
-
-Open **PowerShell** in the scriptforge folder and run:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File install.ps1
-```
-
-That creates a venv, installs the dependencies, runs a self-test, and creates
-shortcuts:
-
-- **Start menu** → *ScriptForge*
-- **Desktop** → *ScriptForge*
-
-Both carry the ScriptForge icon.
-
-If PowerShell's execution policy blocks the script, either use the flag above
-or relax it once:
-
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
-```
-
-### Uninstall
-
-```powershell
-powershell -ExecutionPolicy Bypass -File install.ps1 -Uninstall
-```
-
-### Notes specific to Windows
-
-- **No PTY.** `pexpect` is POSIX-only, so on Windows ScriptForge uses ordinary
-  pipes. Streaming and history work; live prompt-injection of unmarked
-  `Read-Host` prompts is not available.
-- **Execution policy.** Generated wrappers are launched with
-  `-ExecutionPolicy Bypass`, so they run even under a restrictive policy.
-- **Kali tooling.** Windows has no Kali toolset. If you use Kali through
-  VirtualBox or WSL, run ScriptForge *inside* Kali using the Linux install
-  above — that path also gets the PTY features.
-
----
-
-## Usage
-
-```bash
-scriptforge gui                         # browser GUI
-scriptforge                             # terminal TUI
-scriptforge ui ~/bin ~/usr/local/bin     # TUI on specific folders
-scriptforge gui ~/scripts               # GUI on specific folders
-
-scriptforge inspect <script>            # what interface was recovered?
-scriptforge inspect <script> --json     # same, as JSON
-scriptforge plan <script>               # what would forging do?
-scriptforge forge <script> --force      # re-program a UI-less script
-scriptforge run <script> -- list        # run it, passing arguments
-scriptforge scan ~/bin                  # classify every script in a folder
-scriptforge history                     # recent runs
-scriptforge --version                   # scriptforge 0.1.0 — by AIHAM AM
-```
-
-### Keys inside the TUI
-
-| Key | Action |
-|---|---|
-| `↑` `↓` | move between scripts (the right pane updates live) |
-| `/` | search |
-| `Enter` | open the generated interface, or run it |
-| `r` | rescan |
-| `q` | quit |
+</details>
 
 ---
 
 ## How it works
 
-```
-   bash script   ─┐
-   python script ─┼─►  PARSER  ─►  IR  ─►  REWRITER  ─►  UI      ─►  RUNNER
-   powershell   ──┤   bashlex        shared   generated    widgets      pipes
-   batch        ─┘   ast / regex    model    wrapper                   (PTY on POSIX)
-```
-
-The **IR** (Intermediate Representation) is the key idea: every language
-adapter emits the same structure, so nothing downstream ever branches on
-language again.
+<details>
+<summary><b>Architecture</b></summary>
 
 ```
-scriptforge/
-├── scriptforge/
-│   ├── web.py               browser GUI: stdlib http.server + SSE streaming
-│   ├── core/
-│   │   ├── parser/
-│   │   │   ├── ir.py             ★ the shared IR
-│   │   │   ├── bash_adapter.py   bashlex, with a line-scanner fallback
-│   │   │   ├── py_adapter.py     stdlib ast,  with a scanner fallback
-│   │   │   ├── ps_adapter.py     PowerShell param() / Read-Host
-│   │   │   └── classify.py       one entry point
-│   │   ├── rewriter.py           ★ re-programming
-│   │   ├── runner.py             process + PTY driving
-│   │   └── vault.py              run history (SQLite)
-│   ├── ui/
-│   │   ├── app.py                terminal UI
-│   │   ├── web.html              browser UI (single page, no build step)
-│   │   ├── widgets.py            generated forms + the run console
-│   │   └── theme.py              colours and the AIHAM AM banner
-│   ├── forge.py                  ★ orchestrator
-│   └── cli.py
-├── packaging/
-│   ├── icon/                     SVG source + all PNG sizes + .ico
-│   ├── linux/                    .desktop template + icon installer
-│   └── windows/                  Windows launcher bits
-├── install.sh                    Linux installer
-├── install.ps1                   Windows installer
-├── scriptforge.bat               Windows launcher
-└── tests/                        52 tests
+   script.sh
+       │
+       ▼
+ ┌─────────────┐   bashlex AST   → PromptSite / ArgSpec / FlagSpec
+ │   parser    │   (regex scan as fallback)
+ └─────────────┘
+       │
+       ▼
+ ┌─────────────┐   one ScriptIR per script, shared by every front end
+ │  ScriptIR   │
+ └─────────────┘
+       │
+       ├──► rewriter ──► ~/.scriptforge/built/script-forge-<name>   (originals untouched)
+       │
+       ├──► Qt window   ──► form widgets built straight from PromptSite
+       │
+       ├──► terminal UI ──► same IR, rendered as Textual widgets
+       │
+       └──► runner      ──► pexpect PTY, answers injected per prompt
 ```
 
----
+Four adapters cover bash, python, PowerShell and batch. Each produces the same
+`ScriptIR`, so a `.ps1` with `Read-Host` and a `.sh` with `read -rp` reach the
+window through identical code.
 
-## Re-programming, with a real example
+</details>
 
-A real script — `~/bin/cline-acct1`:
+<details>
+<summary><b>Intermediate representation</b></summary>
+
+`ScriptIR` is the contract. Front ends never parse a script themselves.
+
+| Field | Meaning |
+|---|---|
+| `kind` | `interactive`, `parametric`, `skeletal`, `fullscreen`, `opaque` |
+| `lang` | `bash`, `python`, `powershell`, `batch` |
+| `prompt_sites` | line, variable, prompt text, widget hint, choices, default |
+| `positional_args` | indexed arguments with help text |
+| `flags` | short/long, takes-value, help |
+| `subcommands` | `case` branches, `add_parser` subcommands, `%1` dispatch |
+| `output_hints` | detected tools (nmap, sqlmap, …) and expected shape |
+| `parse_mode` | `ast` or `scan`, recorded so the UI can say how it read the file |
+
+`Kind` decides treatment:
+
+| Kind | Meaning | What ScriptForge does |
+|---|---|---|
+| `interactive` | asks questions mid-run | form + PTY with answers injected |
+| `parametric` | subcommands and flags | form + argv assembly |
+| `skeletal` | no discoverable interface | rewriter builds a menu wrapper |
+| `fullscreen` | curses / TUI | raw PTY, keyboard passthrough |
+| `opaque` | delegates to another program | freeform argv box |
+
+</details>
+
+<details>
+<summary><b>Script examples it handles</b></summary>
 
 ```bash
-#!/usr/bin/env bash
-cline --config /home/aiham/.cline-accounts/acct1/settings \
-      --data-dir /home/aiham/.cline-accounts/acct1/data "$@"
+# interactive — read / read -p / read -rp / $'...' prompts
+read -rp "target host: " host
+read -rp "port [443]: " port
+
+# parametric — getopts
+while getopts ":hvp:" opt; do
+  case $opt in
+    h) usage ;;
+    v) verbose=1 ;;
+    p) port=$OPTARG ;;
+  esac
+done
+
+# subcommands — case
+case "$1" in
+  start)  start_server ;;
+  stop)   stop_server  ;;
+  status) show_status   ;;
+esac
 ```
 
-No interface. `scriptforge forge cline-acct1` produces:
-
+```python
+# python — argparse
+parser = argparse.ArgumentParser(description="scan a subnet")
+parser.add_argument("target", help="CIDR range")
+parser.add_argument("-p", "--ports", default="22,80,443")
+parser.add_argument("-v", "--verbose", action="store_true")
 ```
-~/.scriptforge/built/cline-acct1     ← generated
-~/bin/cline-acct1                    ← original, byte-for-byte untouched
+
+```powershell
+# powershell — param() and Read-Host
+param([string]$Target, [int]$Port = 443)
+$Target = Read-Host "target host"
+$Port   = Read-Host "port"
 ```
 
-The generated wrapper resolves the fixed argv, then offers a menu: run as-is,
-add a value, or quit — and it exits cleanly on EOF instead of spinning.
+```batch
+@echo off
+set /p TARGET=target host:
+set /p PORT=port:
+```
+
+</details>
+
+<details>
+<summary><b>Answering prompts over a PTY</b></summary>
+
+`read -rp "q: "` writes its prompt with **no trailing newline**, so a
+line-oriented driver cannot work: there is nothing to split on. The runner
+watches the buffer tail for a prompt-shaped regex and answers it, falling back
+to idle-tick detection for prompts that print nothing.
+
+Three details that are easy to get wrong and are covered by tests:
+
+- **EOF, once per prompt.** Ctrl-D only closes a `read` while the input buffer
+  is empty. A script with three prompts and two answers needs three of them, or
+  it blocks in `read` until the run timeout. Same contract as `bash < answers`.
+- **The matched text lands in `after`, not `before`.** The prompt regex is
+  anchored to the end of the buffer, so it consumes everything and `before` is
+  empty — capturing only `before` silently drops every prompt from the console.
+- **Drain after exit.** A child that dies during a timeout tick has output left
+  in the pty buffer; reading it after the loop is what keeps the last line.
+
+</details>
+
+<details>
+<summary><b>Why Qt</b></summary>
+
+The same code has to open a window on bare-metal Kali, Kali in a VM, and
+Windows 11. That rules out GTK (no first-class Windows story without a
+separate toolchain) and a web view (a browser-based "desktop app" is a web app
+with extra steps).
+
+PySide6 ships identical binaries on all three, is installed by `pip`, and runs
+headless under `QT_QPA_PLATFORM=offscreen` — which is how the whole window is
+tested in CI without an X server.
+
+The terminal UI stays because it is faster over SSH, where a GUI has no place.
+
+</details>
+
+<details>
+<summary><b>Safety boundaries</b></summary>
+
+- Your scripts are never modified. Everything is read-only analysis plus a
+  generated copy in `~/.scriptforge/built/`.
+- Parsing is bounded: 5000 lines, 1 MB, 5 seconds per file. A runaway or
+  binary file is skipped, not hung on.
+- Run history goes to a local SQLite file. Nothing is uploaded.
+- The window listens to nothing; there is no server and no open port.
+
+</details>
 
 ---
 
-## Honest limits
+## Commands
 
-Things this will not do, stated plainly:
-
-- **It is a static analyser.** There is no LLM. Interface recovery is AST plus
-  pattern matching, so a prompt written in unusual prose may be labelled from
-  its variable name instead (`ifc` → "Ifc"). You can always correct it before
-  running.
-- **Choice extraction is best-effort.** Numbered menus like
-  `1) sta  2) ap  3) mon` are recovered well. Long Arabic menu text or menus
-  printed from an array usually fall back to a free-text field.
-- **A `read` with no prompt is still answerable**, but only because the runner
-  treats *output going quiet* as "waiting for input". That works for scripts;
-  for a program that simply pauses for two seconds, the timing heuristic could
-  misfire.
-- **Generated artefacts are skipped.** Anything over 5000 lines is treated as a
-  bundle rather than a human script — a 3.5M-line bundled binary is not a
-  script, and parsing it would hang.
-- **Curses apps cannot be decomposed into widgets.** `htop` and `vim` get an
-  embedded terminal, not a form. That is a hard limit of the terminal itself.
-- **Windows has no PTY**, so prompt injection is unavailable there.
-- **`forkpty()` is called from a worker thread** on the web-GUI path, which
-  Python 3.14 flags as a deadlock risk. The terminal UI avoids this by forking
-  on the UI thread (`ScriptRunner.prepare`). In practice it has not surfaced,
-  but it is a real latent hazard rather than a solved problem.
+| Command | What it does |
+|---|---|
+| `scriptforge` | open the window |
+| `scriptforge gui --lang ar` | open it in Arabic |
+| `scriptforge tui` | terminal interface |
+| `scriptforge inspect <script>` | print the recovered interface |
+| `scriptforge inspect <script> --json` | the same, as IR |
+| `scriptforge plan <script>` | what forging would change |
+| `scriptforge forge <script>` | generate a wrapper for a UI-less script |
+| `scriptforge run <script> --answers k=v` | run headless |
+| `scriptforge scan <dir>` | classify a directory |
+| `scriptforge history` | recent runs |
 
 ---
 
-## Development
+## Features
+
+- **Desktop window** on Linux and Windows 11 from one code path
+- **Arabic and English** from a toolbar button; Arabic switches the whole layout to RTL
+- **Four languages** parsed: bash, python, PowerShell, batch
+- **Live output** streamed into the window while a script runs
+- **Run history** in a local SQLite vault
+- **Search** across every scanned script
+- **Never modifies your scripts**
+- **Terminal UI** for SSH sessions
+- **One-line installers** for both platforms
+
+## Limits
+
+- **No PTY on Windows.** `prompt injection needs a pty, so Windows runs pipes and cannot answer prompts mid-run. Form answers are passed as arguments instead.
+- **Pattern matching, not full semantics.** Recovery reads prompts from ASTs and a scanner; a script that computes its prompt text at runtime is classified but not fully modelled.
+- **Full-screen TUIs are passed through raw.** curses and similar are given a PTY with no widget generation.
+- **Qt is an optional extra.** `pip install scriptforge` gets the CLI and terminal UI; the window needs `pip install "scriptforge[gui]"`.
+- **`forkpty()` runs from a worker thread on repeat runs.** Python 3.14 warns it can deadlock the child. The first run forks on the main thread; later runs may warn. Not observed in practice, not proven safe.
+
+---
+
+## Tests
+
+```
+76 passed
+```
+
+The window is tested headless under `QT_QPA_PLATFORM=offscreen`, which is the
+same no-TTY path a `.desktop` launch takes — the condition that produced the
+original "the app closes itself" report.
 
 ```bash
-source .venv/bin/activate
-pytest tests/ -q                 # 52 tests
-python tests/test_tui_smoke.py   # headless UI check
-```
-
-The tests never touch your real `~/bin` — everything runs in `tmp_path`. Two
-tests deliberately execute real generated scripts to cover the long path.
-
-Regenerating the icons after editing the SVG:
-
-```bash
-cd packaging/icon
-python3 -c "
-import cairosvg
-for s in (16,24,32,48,64,128,256,512):
-    cairosvg.svg2png(url='scriptforge.svg', write_to=f'scriptforge-{s}.png',
-                     output_width=s, output_height=s)
-"
-python3 make_ico.py              # rebuild the Windows .ico
-./install.sh --desktop-only      # reinstall the icon
+.venv/bin/python -m pytest tests/ -q
+.venv/bin/python tests/crash_hunt.py     # sweeps every key in four UI states
 ```
 
 ---
 
-<div align="center">
+## Contributing
 
-**ScriptForge** — any script → a real app
+Issues and pull requests welcome. Useful first steps:
 
-built by **AIHAM AM**
+- `fix(parser): <what> for <which shell>`
+- `feat(gui): <what>`
+- `test(runner): <which edge case>`
 
-</div>
+Run the suite before opening a PR.
+
+<a href="https://github.com/aihams21/scriptforge">
+  <img src="https://img.shields.io/github/stars/aihams21/scriptforge?style=for-the-badge&label=Star%20this%20project" alt="Star">
+</a>
+
+---
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).

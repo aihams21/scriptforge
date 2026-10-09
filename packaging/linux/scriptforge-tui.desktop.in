@@ -1,12 +1,12 @@
 [Desktop Entry]
 Type=Application
 Version=1.0
-Name=ScriptForge
+Name=ScriptForge (terminal)
 GenericName=Script wrapper
 Comment=Turn any bash, python or PowerShell script into a usable app
-Exec=@EXEC@ gui
+Exec=@EXEC@ tui
 Icon=scriptforge
-Terminal=false
+Terminal=true
 Categories=Development;
 Keywords=pentest;security;bash;python;wrapper;ctf;kali;automation;gui;
 StartupNotify=true

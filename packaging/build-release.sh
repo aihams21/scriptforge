@@ -1,95 +1,97 @@
 #!/usr/bin/env bash
-# Build the release folder: ~/Downloads/scriptforge-app/
-# Contains everything needed to install and run ScriptForge on Linux or Windows.
+# Build the two download bundles and the ~/Downloads/ScriptForge folder.
+#
+#   ./packaging/build-release.sh
+#
+# Produces:
+#   ~/Downloads/ScriptForge/               unpacked, browsable
+#   ~/Downloads/ScriptForge-linux.tar.gz   direct download
+#   ~/Downloads/ScriptForge-windows.zip    direct download
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT="${1:-$HOME/Downloads/scriptforge-app}"
+DL="${SCRIPTFORGE_OUT:-$HOME/Downloads}"
+NAME="ScriptForge"
 
-GREEN=$'\033[32m'; DIM=$'\033[2m'; CYAN=$'\033[36m'; OFF=$'\033[0m'
+GREEN=$'\033[32m'; CYAN=$'\033[36m'; DIM=$'\033[2m'; OFF=$'\033[0m'
+[ -t 1 ] || { GREEN=""; CYAN=""; DIM=""; OFF=""; }
 say() { printf '%s==>%s %s\n' "$CYAN" "$OFF" "$1"; }
 ok()  { printf '  %s✓%s %s\n' "$GREEN" "$OFF" "$1"; }
 
-say "Building the release in $OUT"
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
 
-rm -rf "$OUT"
-mkdir -p "$OUT"
+# ------------------------------------------------------------------ staging
+stage() {
+  local dest="$1"
+  mkdir -p "$dest"
+  cp -r "$SRC/scriptforge" "$dest/scriptforge"
+  cp -r "$SRC/packaging"    "$dest/packaging"
+  cp -r "$SRC/tests"        "$dest/tests"
+  cp "$SRC/install.sh" "$SRC/install.ps1" "$SRC/pyproject.toml" \
+     "$SRC/README.md" "$SRC/LICENSE" "$SRC/.gitignore" "$dest/"
+  cp -r "$SRC/docs"         "$dest/docs"
+  find "$dest" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
+  find "$dest" -name '*.pyc' -delete 2>/dev/null || true
+  rm -rf "$dest/scriptforge.egg-info"
+  chmod +x "$dest/install.sh" "$dest/packaging/linux/install-desktop.sh" 2>/dev/null || true
+}
 
-# --- source ---------------------------------------------------------------
-cp -r "$SRC/scriptforge" "$OUT/scriptforge"   # $OUT is fresh, so no nesting
-find "$OUT" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
-rm -rf "$OUT/scriptforge.egg-info"
-ok "application source"
+say "staging trees"
+LINUX_TREE="$STAGE/${NAME}-linux"
+WIN_TREE="$STAGE/${NAME}-windows"
+stage "$LINUX_TREE"
+ok "linux tree"
 
-# --- tests ---------------------------------------------------------------
-mkdir -p "$OUT/tests"
-cp "$SRC/tests"/*.py "$OUT/tests/"
-ok "tests"
+# The Windows zip carries no .desktop entries, no bash installers and no
+# pytest fixtures: shipping them invites someone to run the wrong one.
+rm -rf "$LINUX_TREE/.venv"
+mkdir -p "$WIN_TREE/scriptforge" "$WIN_TREE/packaging/icon"
+cp -r "$SRC/scriptforge/." "$WIN_TREE/scriptforge/"
+cp "$SRC/packaging/icon/scriptforge.ico" "$SRC/packaging/icon/scriptforge.svg" "$WIN_TREE/packaging/icon/"
+mkdir -p "$WIN_TREE/packaging/windows"
+cp "$SRC/packaging/windows/scriptforge.bat" "$WIN_TREE/packaging/windows/"
+cp "$SRC/install.ps1" "$SRC/pyproject.toml" "$SRC/README.md" "$SRC/LICENSE" "$WIN_TREE/"
+mkdir -p "$WIN_TREE/docs"
+cp "$SRC/docs/banner.svg" "$SRC/docs/banner.png" "$SRC/docs/demo.gif" "$WIN_TREE/docs/"
+find "$WIN_TREE" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
+ok "windows tree"
 
-# --- packaging + installers ---------------------------------------------
-mkdir -p "$OUT/packaging/icon" "$OUT/packaging/linux" "$OUT/packaging/windows"
-cp "$SRC/packaging/icon"/*.svg "$SRC/packaging/icon"/*.png "$SRC/packaging/icon"/*.ico \
-   "$SRC/packaging/icon/make_ico.py" "$OUT/packaging/icon/"
-cp "$SRC/packaging/linux"/* "$OUT/packaging/linux/"
-cp "$SRC/packaging/windows"/* "$OUT/packaging/windows/"
-ok "icons, desktop entries and Windows assets"
-
-cp "$SRC/install.sh" "$SRC/install.ps1" "$SRC/scriptforge.bat" \
-   "$SRC/pyproject.toml" "$SRC/README.md" "$SRC/LICENSE" "$SRC/.gitignore" "$OUT/"
-chmod +x "$OUT/install.sh" "$OUT/packaging/linux/install-desktop.sh"
-ok "installers and metadata"
-
-# --- quick reference ------------------------------------------------------
-cat > "$OUT/QUICK-START.md" <<'EOF'
-# Quick start
-
-## Kali Linux / any Linux
-
-```bash
-chmod +x install.sh
-./install.sh --desktop     # installs, self-tests, adds the icon
-scriptforge gui            # mouse-driven, opens in your browser
-scriptforge                # terminal interface
-```
-
-## Windows 10 / 11
-
-```powershell
-powershell -ExecutionPolicy Bypass -File install.ps1
-```
-
-Creates **ScriptForge** (terminal) and **ScriptForge GUI** (browser) on the
-Start menu and the Desktop.
-
-## What it does
-
-Pick any `.sh` / `.py` / `.ps1` / `.bat` script. ScriptForge reads its hidden
-interface and builds a screen for it. Scripts with no interface are
-re-programmed into interactive wrappers — your originals are never modified.
-EOF
-ok "QUICK-START.md"
-
-# --- self check -----------------------------------------------------------
-say "Verifying the build"
-cd "$OUT"
-python3 -c "
+# ------------------------------------------------------------------ verify
+say "verifying"
+"$SRC/.venv/bin/python" - "$LINUX_TREE" "$WIN_TREE" <<'PYCHECK'
 import ast, pathlib, sys
-files = list(pathlib.Path('scriptforge').rglob('*.py')) + list(pathlib.Path('tests').rglob('*.py'))
-for f in files:
-    ast.parse(f.read_text())
-print(f'  {len(files)} python files parse cleanly')
+for root in sys.argv[1:]:
+    files = sorted(pathlib.Path(root).rglob("*.py"))
+    for f in files:
+        ast.parse(f.read_text(), filename=str(f))
+    print(f"  {root}: {len(files)} python files parse")
+PYCHECK
+ok "python parses"
+bash -n "$LINUX_TREE/install.sh" && echo "  install.sh syntax ok"
+bash -n "$LINUX_TREE/packaging/linux/install-desktop.sh" && echo "  install-desktop.sh syntax ok"
+"$SRC/.venv/bin/python" -c "
+d=open('$LINUX_TREE/packaging/icon/scriptforge.ico','rb').read()
+assert d[:4]==b'\x00\x00\x01\x00','ICO header bad'
+print('  scriptforge.ico header ok')
 "
-bash -n install.sh && echo "  install.sh syntax OK"
-bash -n packaging/linux/install-desktop.sh && echo "  install-desktop.sh syntax OK"
-python3 -c "
-import zipfile
-zipfile.ZipFile('packaging/icon/scriptforge.ico').testzip() if False else None
-d = open('packaging/icon/scriptforge.ico','rb').read()
-assert d[:4] == b'\x00\x00\x01\x00', 'ICO header bad'
-print('  scriptforge.ico header OK')
-"
-ok "build verified"
+ok "assets verified"
 
-printf '\n%sRelease ready:%s  %s\n\n' "$GREEN" "$OFF" "$OUT"
-find "$OUT" -maxdepth 1 -mindepth 1 -printf '  %f\n' | sort
-printf '  %s files total\n' "$(find "$OUT" -type f | wc -l)"
+# ------------------------------------------------------------------ publish
+say "publishing to $DL"
+rm -rf "$DL/$NAME" "$DL/${NAME}-linux.tar.gz" "$DL/${NAME}-windows.zip"
+
+cp -r "$LINUX_TREE" "$DL/$NAME"
+ok "folder:  $DL/$NAME"
+
+tar -czf "$DL/${NAME}-linux.tar.gz" -C "$STAGE" "$NAME-linux"
+ok "archive: $(basename "$DL/${NAME}-linux.tar.gz")  $(du -h "$DL/${NAME}-linux.tar.gz" | cut -f1)"
+
+( cd "$STAGE" && zip -qr "$DL/${NAME}-windows.zip" "$NAME-windows" )
+ok "archive: $(basename "$DL/${NAME}-windows.zip")  $(du -h "$DL/${NAME}-windows.zip" | cut -f1)"
+
+printf '\n%sDone.%s\n\n' "$GREEN" "$OFF"
+printf '  folder    %s/%s\n' "$DL" "$NAME"
+printf '  linux     %s/%s-linux.tar.gz\n' "$DL" "$NAME"
+printf '  windows   %s/%s-windows.zip\n' "$DL" "$NAME"
+printf '  files     %s\n\n' "$(find "$DL/$NAME" -type f | wc -l)"

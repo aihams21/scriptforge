@@ -1,192 +1,196 @@
 <#
 .SYNOPSIS
-    ScriptForge installer for Windows 10/11 - by AIHAM AM
+    ScriptForge installer for Windows 10/11.
 
 .DESCRIPTION
-    Creates a private Python environment, installs ScriptForge, and puts
-    shortcuts on the Start menu and the Desktop.
+    Creates an isolated virtual environment, installs the package, adds a
+    desktop shortcut and a Start-menu entry for the window, and runs a
+    self-test. Safe to re-run: it only installs what is missing.
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File install.ps1
+    iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/aihams21/scriptforge/main/install.ps1'))
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File install.ps1 -Uninstall
+    powershell -ExecutionPolicy Bypass -File .\install.ps1 -Prefix "$env:LOCALAPPDATA\ScriptForge"
 #>
-
 [CmdletBinding()]
 param(
-    [switch]$Uninstall,
-    [switch]$NoShortcuts
+    [string]$Prefix = "$env:LOCALAPPDATA\ScriptForge",
+    [string]$Version = "v0.1.0",
+    [string]$LocalSource = "",
+    [switch]$SkipDesktop,
+    [switch]$NoWindow
 )
 
-$ErrorActionPreference = 'Stop'
-$Root    = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Venv    = Join-Path $Root '.venv'
-$PyExe   = Join-Path $Venv 'Scripts\python.exe'
-$Icon    = Join-Path $Root 'packaging\icon\scriptforge.ico'
-$StartM  = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
-$Desktop = [Environment]::GetFolderPath('Desktop')
+$ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
 
-function Step($m) { Write-Host "==> $m" -ForegroundColor Cyan }
-function Ok($m)   { Write-Host "  [OK] $m" -ForegroundColor Green }
-function Die($m)  { Write-Host "  [X] $m"  -ForegroundColor Red; exit 1 }
+$Repo = "https://github.com/aihams21/scriptforge"
 
-# ------------------------------------------------------------------ banner
+function Write-Step($m) { Write-Host "==> $m" -ForegroundColor Cyan }
+function Write-Ok($m)   { Write-Host "  [ok] $m" -ForegroundColor Green }
+function Write-Note($m) { Write-Host "  [!] $m"  -ForegroundColor Yellow }
+function Die($m) { Write-Host "  [x] $m" -ForegroundColor Red; exit 1 }
 
-Write-Host ''
-Write-Host '   ___  _____ ____ _   _  _____' -ForegroundColor Green
-Write-Host '  / __||  _  |_   _| | | ||  ___|   any script -> a real app' -ForegroundColor Green
-Write-Host '  \__ \ | |__  | | | |_| || |_      _   _    | |   ____ ___' -ForegroundColor Green
-Write-Host '  |___/ |____| |_|  \__, |___|     | |_| |   | |  / __|  _ \' -ForegroundColor Green
-Write-Host '                          |___/     \__, |   | | | (__| | | |' -ForegroundColor Green
-Write-Host '   _   _   ___  ____ _    _____      __/ |   |_|  \___|_| |_|' -ForegroundColor Green
-Write-Host '  | | | | / _ \|  _ \ |  |_   _|    /____|' -ForegroundColor Green
-Write-Host '  | |_| || | | | |_) || | | | |    scriptforge' -ForegroundColor Green
-Write-Host '  |  _  || |_| |  _ < | | | | |           AIHAM AM' -ForegroundColor Green
-Write-Host '  |_| |_| \___/|_| \_\|_| |_| |_|          bash + python + powershell' -ForegroundColor Green
-Write-Host ''
+Write-Host ""
+Write-Host "ScriptForge" -ForegroundColor White -NoNewline
+Write-Host "  any script becomes a usable app" -ForegroundColor DarkGray
+Write-Host ""
 
-# ------------------------------------------------------------------ uninstall
-
-$Links = @(
-    (Join-Path $StartM 'ScriptForge.lnk')
-    (Join-Path $StartM 'ScriptForge GUI.lnk')
-    (Join-Path $Desktop  'ScriptForge.lnk')
-    (Join-Path $Desktop  'ScriptForge GUI.lnk')
-)
-
-if ($Uninstall) {
-    Step 'Removing ScriptForge shortcuts'
-    foreach ($l in $Links) { if (Test-Path $l) { Remove-Item $l -Force; Ok "removed $l" } }
-    if (Test-Path $Venv) { Write-Host '  the .venv folder was left in place (delete it if you want)' -ForegroundColor DarkGray }
-    Write-Host ''
-    Write-Host 'Uninstalled. Your own scripts were never touched.' -ForegroundColor Green
-    Write-Host ''
-    exit 0
-}
-
-# ------------------------------------------------------------------ preflight
-
-Step 'Checking prerequisites'
-
+# ---------------------------------------------------------------- interpreter
 $py = $null
-foreach ($cand in @('python', 'python3', 'py')) {
-    try {
-        $exe = (Get-Command $cand -ErrorAction Stop).Source
-        $v = & $exe -c "import sys;print('%d.%d' % sys.version_info[:2])" 2>$null
-        if ($v) { $py = $exe; $pyv = $v; break }
-    } catch { }
+foreach ($cand in @("py", "python3", "python")) {
+    if (Get-Command $cand -ErrorAction SilentlyContinue) {
+        $candPath = (Get-Command $cand).Source
+        # The `py` launcher is the only reliable way to hit 64-bit Python on
+        # Windows; a bare `python` may be the 32-bit Store stub that cannot
+        # load PySide6's wheels.
+        if ($cand -eq "py") { $py = $cand } else { $py = $cand }
+        break
+    }
 }
-if (-not $py) { Die 'Python 3.10+ not found. Install it from https://www.python.org/downloads/ (tick "Add to PATH").' }
-Ok "python $pyv"
+if (-not $py) { Die "Python 3.10+ not found. Install it from https://www.python.org/downloads/ and tick 'Add to PATH'." }
 
-# ------------------------------------------------------------------ venv
+$verOut = & $py -c "import sys;print('%d.%d' % sys.version_info[:2])" 2>$null
+if (-not $verOut) { Die "Python is present but not runnable: $py" }
+Write-Ok "python $verOut  ($py)"
 
-if (-not (Test-Path $PyExe)) {
-    Step 'Creating virtual environment'
-    & $py -m venv $Venv
-    if (-not (Test-Path $PyExe)) { Die "could not create the environment at $Venv" }
-    Ok "created $Venv"
+# -------------------------------------------------------------------- fetch
+Write-Step "download"
+$tmp = Join-Path $env:TEMP ("sf-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
+New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+
+if ($LocalSource -and (Test-Path $LocalSource)) {
+    $src = (Resolve-Path $LocalSource).Path
+    Write-Ok "using local source: $src"
 } else {
-    Ok 'reusing existing .venv'
+    $url = "$Repo/archive/refs/tags/$Version.tar.gz"
+    $tgz = Join-Path $tmp "sf.tar.gz"
+    try {
+        Write-Ok "fetching $Version"
+        (New-Object System.Net.WebClient).DownloadFile($url, $tgz)
+    } catch {
+        $url = "$Repo/archive/refs/heads/main.tar.gz"
+        Write-Note "tag fetch failed, trying main"
+        (New-Object System.Net.WebClient).DownloadFile($url, $tgz)
+    }
+    & tar -xzf $tgz -C $tmp
+    if ($LASTEXITCODE -ne 0) { Die "could not unpack the archive" }
+    $src = (Get-ChildItem -Path $tmp -Directory | Where-Object { $_.Name -like "scriptforge-*" } | Select-Object -First 1).FullName
+    if (-not $src) { Die "unexpected archive layout" }
 }
 
-Step 'Installing dependencies'
-& $PyExe -m pip install --quiet --upgrade pip 2>$null
-& $PyExe -m pip install --quiet -e $Root
-if ($LASTEXITCODE -ne 0) {
-    Write-Host '  editable install failed, falling back to plain dependencies' -ForegroundColor DarkGray
-    & $PyExe -m pip install --quiet 'bashlex>=0.18' 'textual>=0.60'
-    if ($LASTEXITCODE -ne 0) { Die 'dependency install failed - check your internet connection' }
+# -------------------------------------------------------------------- layout
+Write-Step "layout"
+New-Item -ItemType Directory -Path $Prefix -Force | Out-Null
+foreach ($item in @("scriptforge", "packaging")) {
+    $dest = Join-Path $Prefix $item
+    if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
+    Copy-Item -Recurse -Force (Join-Path $src $item) $dest
 }
-Ok 'installed (bashlex, textual)'
+foreach ($f in @("pyproject.toml", "LICENSE", "README.md")) {
+    $p = Join-Path $src $f
+    if (Test-Path $p) { Copy-Item -Force $p (Join-Path $Prefix $f) }
+}
+Get-ChildItem -Path $Prefix -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue |
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+Write-Ok "installed to $Prefix"
 
-# pexpect is POSIX-only; the engine falls back to pipes on Windows by design
-& $PyExe -m pip install --quiet pexpect 2>$null
-Ok 'optional pexpect skipped on Windows (pipe mode is used instead)'
+# --------------------------------------------------------------------- venv
+Write-Step "python environment"
+$Venv = Join-Path $Prefix "venv"
+$Vpy  = Join-Path $Venv "Scripts\python.exe"
+if (-not (Test-Path $Vpy)) {
+    & $py -m venv $Venv
+    if ($LASTEXITCODE -ne 0) { Die "could not create a virtual environment" }
+}
+Write-Ok "venv ready"
 
-# ------------------------------------------------------------------ verify
+& $Vpy -m pip install --quiet --upgrade pip setuptools wheel 2>$null
+& $Vpy -m pip install --quiet -e $Prefix
+if ($LASTEXITCODE -ne 0) { Die "pip install failed" }
+& $Vpy -m pip install --quiet PySide6
+if ($LASTEXITCODE -ne 0) { Write-Note "PySide6 could not be installed; the terminal UI still works" }
+Write-Ok "packages installed"
 
-Step 'Verifying the install'
+# ----------------------------------------------------------------- shortcuts
+if (-not $SkipDesktop) {
+    Write-Step "shortcuts"
+    $Target = Join-Path $Venv "Scripts\scriptforge.exe"
+    if (-not (Test-Path $Target)) {
+        $script = Join-Path $Venv "Scripts\scriptforge-script.py"
+        if (Test-Path $script) {
+            $bat = Join-Path $Prefix "ScriptForge.bat"
+            "@echo off`r`n`"$Vpy`" `"$script`" %*`r`n" | Set-Content -Path $bat -Encoding ASCII
+            $Target = $bat
+        }
+    }
 
-$env:PYTHONPATH = $Root
-$SelfTest = @'
-import tempfile
-from pathlib import Path
-from scriptforge.core.parser import analyze, Kind
-from scriptforge.core.rewriter import rewrite
-from scriptforge.core.runner import IS_WINDOWS, ScriptRunner
-from scriptforge.core.parser.ps_adapter import analyze_powershell
-from scriptforge.ui import theme
-
-tmp = Path(tempfile.mkdtemp())
-
-py = tmp / "ask.py"
-py.write_text('#!/usr/bin/env python3\nt = input("target: ")\nprint("hit", t)\n')
-ir = analyze(py)
-assert ir.kind is Kind.INTERACTIVE, ir.kind
-print("  parser   ok   recovered a python prompt")
-
-ps = tmp / "probe.ps1"
-ps.write_text('param([string]$Target)\n$t = Read-Host "port"\nWrite-Host "dial $Target:$t"\n')
-ir2 = analyze_powershell(ps)
-assert [p.var for p in ir2.prompt_sites] == ["t"], ir2.prompt_sites
-assert [a.name for a in ir2.positional_args] == ["Target"], ir2.positional_args
-print("  ps       ok   recovered Read-Host + param()")
-
-r = ScriptRunner(py, answers={"t": "10.0.0.1"}, timeout=30).run_plain(args=["x"])
-assert r.ok, r.output
-print(f"  runner   ok   exit={r.exit_code} windows={IS_WINDOWS}")
-
-print(f"  ui       ok   {theme.version_line()}")
-'@
-$SelfTest | & $PyExe -
-if ($LASTEXITCODE -ne 0) { Die 'self-test failed - the install is not usable' }
-Ok 'self-test passed'
-
-# ------------------------------------------------------------------ shortcuts
-
-if (-not $NoShortcuts) {
-    Step 'Creating shortcuts'
     $shell = New-Object -ComObject WScript.Shell
-    $Target = Join-Path $Venv 'Scripts\scriptforge.exe'
-    if (-not (Test-Path $Target)) { $Target = Join-Path $Venv 'Scripts\scriptforge-scriptforge.exe' }
-    if (-not (Test-Path $Target)) { $Target = $PyExe }
+    $Icon = Join-Path $Prefix "packaging\icon\scriptforge.ico"
 
-    # Terminal UI + browser GUI, so there is a mouse-driven option on Windows too
-    $entries = @(
-        @{ Name = 'ScriptForge';      Args = 'ui';  Style = 1 }
-        @{ Name = 'ScriptForge GUI';  Args = 'gui'; Style = 7 }
-    )
+    $StartM = [Environment]::GetFolderPath("StartMenu")
+    $Desk   = [Environment]::GetFolderPath("Desktop")
 
-    foreach ($dir in @($StartM, $Desktop)) {
+    foreach ($dir in @($StartM, $Desk)) {
         if (-not (Test-Path $dir)) { continue }
-        foreach ($e in $entries) {
-            $lnk = Join-Path $dir ($e.Name + '.lnk')
-            $sc  = $shell.CreateShortcut($lnk)
-            $sc.TargetPath       = $Target
-            $sc.Arguments        = $e.Args
-            $sc.WorkingDirectory = $Root
-            $sc.Description      = 'Turn any bash, python or PowerShell script into a usable app'
+        foreach ($entry in @(
+            @{ Name = "ScriptForge";     Args = "";     Style = 1 },
+            @{ Name = "ScriptForge TUI"; Args = " tui";  Style = 1 }
+        )) {
+            $lnk = Join-Path $dir ($entry.Name + ".lnk")
+            $sc = $shell.CreateShortcut($lnk)
+            $sc.TargetPath = $Target
+            $sc.Arguments = $entry.Args
+            $sc.WorkingDirectory = $Prefix
+            $sc.Description = "Turn any bash, python or PowerShell script into a usable app"
             if (Test-Path $Icon) { $sc.IconLocation = "$Icon,0" }
-            $sc.WindowStyle      = $e.Style   # 1 = console, 7 = minimised
+            $sc.WindowStyle = $entry.Style
             $sc.Save()
-            Ok "shortcut -> $lnk"
+            Write-Ok "shortcut -> $lnk"
         }
     }
 }
 
-# ------------------------------------------------------------------ done
+# ----------------------------------------------------------------- self test
+Write-Step "self-test"
+$check = @'
+import sys, pathlib
+root = pathlib.Path(sys.argv[1]); sys.path.insert(0, str(root))
+from scriptforge.core.parser.classify import analyze
+from scriptforge.core.rewriter import rewrite
+probe = root / "_selftest.ps1"
+probe.write_text('$h = Read-Host "host"\nWrite-Host "ok $h"\n')
+ir = analyze(probe)
+assert ir.prompt_sites, "parser recovered no prompts"
+before = probe.read_bytes()
+res = rewrite(ir)
+assert res.ok, res.message
+assert probe.read_bytes() == before, "rewrite touched the original"
+probe.unlink()
+try:
+    import PySide6; gui = "ok"
+except Exception:
+    gui = "absent"
+print("  parser  ok  %d prompt(s) recovered" % len(ir.prompt_sites))
+print("  rewriter ok  source untouched")
+print("  gui     %s" % gui)
+'@
+$checkFile = Join-Path $tmp "check.py"
+$check | Set-Content -Path $checkFile -Encoding UTF8
+& $Vpy $checkFile $Prefix
+if ($LASTEXITCODE -ne 0) { Die "self-test failed" }
+Write-Ok "self-test passed"
 
-Write-Host ''
-Write-Host 'scriptforge is ready.' -ForegroundColor Green
-Write-Host ''
-Write-Host '  Run it:   Start menu -> ScriptForge (terminal) or ScriptForge GUI (browser)'
-Write-Host '  Or:      .\.venv\Scripts\scriptforge.exe ui'
-Write-Host ''
-Write-Host '  Try:'
-Write-Host '    .\.venv\Scripts\scriptforge.exe scan  $env:USERPROFILE\bin'
-Write-Host '    .\.venv\Scripts\scriptforge.exe inspect .\myscript.ps1'
-Write-Host ''
-Write-Host '  Remove it:  powershell -ExecutionPolicy Bypass -File install.ps1 -Uninstall'
-Write-Host ''
+Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+
+Write-Host ""
+Write-Host "ScriptForge is ready." -ForegroundColor Green
+Write-Host ""
+Write-Host "  window    Start menu -> ScriptForge"
+Write-Host "  terminal  $Prefix\venv\Scripts\scriptforge.exe tui"
+Write-Host ""
+
+if (-not $NoWindow) {
+    Start-Process (Join-Path $Prefix "venv\Scripts\scriptforge.exe")
+}

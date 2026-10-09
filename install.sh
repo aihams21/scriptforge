@@ -1,157 +1,171 @@
 #!/usr/bin/env bash
-# scriptforge installer - by AIHAM AM
-# Creates a venv, installs dependencies, verifies the install, and prints
-# follow-up commands. Safe to re-run.
-
+# One-line installer.
+#
+#   curl -fsSL https://raw.githubusercontent.com/aihams21/scriptforge/main/install.sh | bash
+#
+# Idempotent, non-interactive by default, and safe to re-run: it only installs
+# what is missing and never removes anything.
 set -euo pipefail
 
-# flags: --desktop   also install the icon + app-menu + Desktop entry
-#        --desktop-only   skip the venv work, just do the desktop integration
-WANT_DESKTOP=0
-DESKTOP_ONLY=0
+REPO="https://github.com/aihams21/scriptforge"
+TAG="${SCRIPTFORGE_TAG:-v0.1.0}"
+PREFIX="${SCRIPTFORGE_PREFIX:-$HOME/.local/share/scriptforge}"
+APP_BIN="${SCRIPTFORGE_BIN:-$HOME/.local/bin}"
+GUI_ONLY=0
+
+GREEN=$'\033[32m'; YELLOW=$'\033[33m'; RED=$'\033[31m'
+CYAN=$'\033[36m'; DIM=$'\033[2m'; BOLD=$'\033[1m'; OFF=$'\033[0m'
+[ -t 1 ] || { GREEN=""; YELLOW=""; RED=""; CYAN=""; DIM=""; BOLD=""; OFF=""; }
+
+step() { printf '%s==>%s %s%s%s\n' "$CYAN" "$OFF" "$BOLD" "$1" "$OFF"; }
+ok()   { printf '  %s✓%s %s\n' "$GREEN" "$OFF" "$1"; }
+warn() { printf '  %s!%s %s\n' "$YELLOW" "$OFF" "$1"; }
+die()  { printf '  %s✗%s %s\n' "$RED" "$OFF" "$1" >&2; exit 1; }
+
+trap 'die "install failed at line $LINENO"' ERR
+
 for arg in "$@"; do
   case "$arg" in
-    --desktop)       WANT_DESKTOP=1 ;;
-    --desktop-only)  WANT_DESKTOP=1; DESKTOP_ONLY=1 ;;
-    *) printf "unknown flag: %s\n" "$arg" >&2; exit 2 ;;
+    --gui) GUI_ONLY=1 ;;
+    --prefix=*) PREFIX="${arg#*=}" ;;
+    --help|-h)
+      sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0 ;;
   esac
 done
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV="$HERE/.venv"
-GREEN=$'\033[32m'; RED=$'\033[31m'; DIM=$'\033[2m'; CYAN=$'\033[36m'; OFF=$'\033[0m'
+printf '\n%sScriptForge%s %s— any script becomes a usable app\n\n' "$BOLD" "$OFF" "$DIM"
 
-step() { printf '%s==>%s %s\n' "$CYAN" "$OFF" "$1"; }
-ok()   { printf '  %s✓%s %s\n' "$GREEN" "$OFF" "$1"; }
-die()  { printf '  %s✗%s %s\n' "$RED" "$OFF" "$1" >&2; exit 1; }
-
-printf '%s' "$GREEN"
-cat <<'BANNER'
-   ___  _____ ____ _   _  _____
-  / __||  _  |_   _| | | ||  ___|   any script -> a real app
-  |__ \ | |__  | | | |_| || |_      _   _    | |   ____ ___
-  |___/ |____| |_|  \__, |___|     | |_| |   | |  / __|  _ \
-                          |___/     \__, |   | | | (__| | | |
-   _   _   ___  ____ _    _____      __/ |   |_|  \___|_| |_|
-  | | | | / _ \|  _ \ |  |_   _|    /____|
-  | |_| || | | | |_) || | | | |    scriptforge
-  |  _  || |_| |  _ < | | | | |           AIHAM AM
-  |_| |_| \___/|_| \_\|_| |_| |_|          bash + python, one interface
-BANNER
-printf '%s' "$OFF"
-
-if [ "$DESKTOP_ONLY" -eq 1 ]; then
-  SCRIPTFORGE_EXEC="$VENV/bin/scriptforge" \
-    "$HERE/packaging/linux/install-desktop.sh"
-  exit 0
+# ---------------------------------------------------------------- system deps
+# Debian/Ubuntu only. Kali and Ubuntu derivatives are the target; elsewhere we
+# skip rather than guess at a package manager.
+need_sudo=""
+if [ "$(id -u)" -ne 0 ]; then
+  if command -v sudo >/dev/null 2>&1; then
+    need_sudo="sudo"
+  fi
 fi
 
-# ---------------------------------------------------------------- preflight
-
-step "Checking prerequisites"
-
-command -v python3 >/dev/null || die "python3 not found - install python3 first"
-
-PYV="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
-ok "python3 $PYV"
-python3 - <<'PY' || die "python 3.10+ required (found $(python3 -V 2>&1))"
-import sys
-raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
-PY
-ok "version check passed"
-
-# ---------------------------------------------------------------- venv
-
-if [ ! -d "$VENV" ]; then
-  step "Creating virtual environment"
-  python3 -m venv "$VENV" || die "could not create venv at $VENV"
-  ok "created $VENV"
+if command -v apt-get >/dev/null 2>&1 && [ -z "$SKIP_APT" ]; then
+  step "system packages"
+  # Qt needs these at import time on a bare container. python3-pip/venv build the
+  # virtualenv; the rest are Qt/xcb runtime libraries that are present on a
+  # desktop but absent on a fresh VM.
+  APT_PKGS="python3 python3-venv python3-pip libgl1 libegl1 libxkbcommon-x11-0 libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-xkb1 libxkbcommon0 libfontconfig1"
+  if command -v apt-get >/dev/null 2>&1; then
+    MISSING=""
+    for pkg in $APT_PKGS; do
+      if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+        MISSING="$MISSING $pkg"
+      fi
+    done
+    if [ -n "$MISSING" ]; then
+      $need_sudo apt-get update -qq || warn "apt-get update failed, trying install anyway"
+      # shellcheck disable=SC2086
+      DEBIAN_FRONTEND=noninteractive $need_sudo apt-get install -y -qq $MISSING \
+        || warn "some packages could not be installed; continuing"
+      ok "system packages ready"
+    else
+      ok "system packages already present"
+    fi
+  fi
 else
-  ok "reusing existing $VENV"
+  step "system packages"
+  warn "apt-get not found; assuming dependencies are present"
 fi
 
-PY="$VENV/bin/python"
-[ -x "$PY" ] || die "missing interpreter at $PY"
+# ------------------------------------------------------------------- fetch
+step "download"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
 
-step "Upgrading pip"
-"$PY" -m pip install --quiet --upgrade pip >/dev/null 2>&1 || true
-ok "pip ready"
-
-# ---------------------------------------------------------------- deps
-
-step "Installing dependencies"
-if ! "$PY" -m pip install --quiet -e "$HERE" 2>/dev/null; then
-  printf '  %s!%s editable install failed, trying plain dependencies\n' "$DIM" "$OFF"
-  "$PY" -m pip install --quiet \
-    "bashlex>=0.18" "textual>=0.60" "pexpect>=4.9" \
-    || die "dependency install failed - check your network"
+if [ -n "$SCRIPTFORGE_LOCAL" ]; then
+  SRC="$SCRIPTFORGE_LOCAL"
+  ok "using local source: $SRC"
+else
+  URL="$REPO/archive/refs/tags/$TAG.tar.gz"
+  if ! curl -fsSL "$URL" -o "$TMP/sf.tar.gz"; then
+    URL="$REPO/archive/refs/heads/main.tar.gz"
+    curl -fsSL "$URL" -o "$TMP/sf.tar.gz" || die "download failed: $URL"
+  fi
+  tar -xzf "$TMP/sf.tar.gz" -C "$TMP"
+  SRC="$(find "$TMP" -maxdepth 1 -type d -name 'scriptforge-*' | head -1)"
+  [ -n "$SRC" ] || die "unexpected archive layout"
+  ok "downloaded $TAG"
 fi
-ok "bashlex, textual, pexpect installed"
 
-# ---------------------------------------------------------------- verify
+mkdir -p "$PREFIX" "$APP_BIN"
+cp -r "$SRC/scriptforge" "$PREFIX/scriptforge"
+cp -r "$SRC/packaging" "$PREFIX/packaging"
+# pyproject.toml must sit beside the package directory: the project root is what
+# pip installs from, so shipping only scriptforge/ yields "not a Python project".
+[ -f "$SRC/pyproject.toml" ] && cp "$SRC/pyproject.toml" "$PREFIX/pyproject.toml"
+[ -f "$SRC/LICENSE" ] && cp "$SRC/LICENSE" "$PREFIX/LICENSE"
+[ -f "$SRC/README.md" ] && cp "$SRC/README.md" "$PREFIX/README.md"
+rm -rf "$PREFIX/scriptforge/__pycache__" "$PREFIX/scriptforge/gui/__pycache__"
+ok "installed to $PREFIX"
 
-step "Verifying the install"
+# ------------------------------------------------------------- virtualenv
+step "python environment"
+if [ ! -x "$PREFIX/venv/bin/python" ]; then
+  python3 -m venv "$PREFIX/venv" || die "could not create a virtualenv (install python3-venv)"
+fi
+"$PREFIX/venv/bin/python" -m pip install -q --upgrade pip setuptools wheel >/dev/null 2>&1 || true
+"$PREFIX/venv/bin/python" -m pip install -q -e "$PREFIX" || die "could not install scriptforge"
+if [ "$GUI_ONLY" -eq 1 ]; then
+  "$PREFIX/venv/bin/python" -m pip install -q PySide6 || die "could not install PySide6"
+fi
+ok "venv ready at $PREFIX/venv"
 
-cd "$HERE"
-export PYTHONPATH="$HERE"
+ln -sf "$PREFIX/venv/bin/scriptforge" "$APP_BIN/scriptforge"
+case ":$PATH:" in
+  *":$APP_BIN:"*) ;;
+  *) warn "$APP_BIN is not on your PATH — add it to open a terminal" ;;
+esac
+ok "linked $APP_BIN/scriptforge"
 
-"$PY" - <<'PY' || die "self-test failed - the install is not usable"
-import tempfile
-from pathlib import Path
+# ------------------------------------------------------------------- launch
+if [ "$GUI_ONLY" -eq 1 ] && [ -n "$DISPLAY$WAYLAND_DISPLAY" ]; then
+  step "desktop integration"
+  "$PREFIX/packaging/linux/install-desktop.sh" >/dev/null 2>&1 \
+    && ok "desktop icon installed" \
+    || warn "could not install the desktop icon (no permissions?)"
+fi
 
-from scriptforge.core.parser import Kind, analyze
+# --------------------------------------------------------------------- self test
+step "self-test"
+PY="$PREFIX/venv/bin/python"
+"$PY" - "$PREFIX" <<'PYCHECK'
+import sys, pathlib
+root = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(root))
+
+from scriptforge.core.parser.classify import analyze
 from scriptforge.core.rewriter import rewrite
-from scriptforge.core.runner import HAS_PEXPECT, ScriptRunner
-from scriptforge.forge import plan
-from scriptforge.ui import theme
 
-tmp = Path(tempfile.mkdtemp())
-
-# 1. an interactive bash script must recover its prompts
-ask = tmp / "ask.sh"
-ask.write_text('#!/bin/bash\necho "target:"\nread -r target\necho "hit $target"\n')
-ask.chmod(0o755)
-ir = analyze(ask)
-assert ir.kind is Kind.INTERACTIVE, ir.kind
-assert [s.var for s in ir.prompt_sites] == ["target"], ir.prompt_sites
-print("  parser   ok   recovered 1 prompt from a bash script")
-
-# 2. a UI-less script must be planned for re-programming
-wrapper = tmp / "acct"
-wrapper.write_text('#!/bin/bash\nsomecli --config /x/settings "$@"\n')
-wrapper.chmod(0o755)
-p = plan(wrapper)
-assert p.action == "rewrite", p.action
-res = rewrite(p.ir, out_dir=tmp / "built", force=True)
+probe = root / "_selftest.sh"
+probe.write_text('#!/bin/bash\necho "host:"\nread -r h\necho "ok $h"\n')
+ir = analyze(probe)
+assert ir.prompt_sites, "parser recovered no prompts"
+assert ir.kind.value == "interactive", ir.kind
+before = probe.read_bytes()
+res = rewrite(ir)
 assert res.ok, res.message
-assert wrapper.read_text() == '#!/bin/bash\nsomecli --config /x/settings "$@"\n', "source was modified!"
-print("  rewriter ok   generated a wrapper, original untouched")
+assert probe.read_bytes() == before, "rewrite touched the original"
+probe.unlink()
 
-# 3. the runner must execute a script and capture its output
-r = ScriptRunner(ask, answers={"target": "10.0.0.1"}, timeout=30).run_interactive()
-assert "hit 10.0.0.1" in r.output, r.output
-print(f"  runner   ok   pty={'yes' if HAS_PEXPECT else 'no'}, exit={r.exit_code}")
-
-# 4. the UI must import and report its version
-print(f"  ui       ok   {theme.version_line()}")
-PY
+try:
+    import PySide6  # noqa: F401
+    have_gui = True
+except Exception:
+    have_gui = False
+print(f"  parser  ok  {len(ir.prompt_sites)} prompt(s) recovered")
+print(f"  rewriter ok  wrapper built, source untouched")
+print(f"  gui     {'ok  PySide6 present' if have_gui else 'absent  (run with --gui)'}")
+PYCHECK
 ok "self-test passed"
 
-# ---------------------------------------------------------------- done
-
-cat <<DONE
-
-$(printf '%s' "$GREEN")scriptforge is ready.$(printf '%s' "$OFF")
-
-  Run it:            $VENV/bin/scriptforge
-  Alias for now:     alias scriptforge='$VENV/bin/scriptforge'
-
-  Try:
-    $VENV/bin/scriptforge                       interactive UI
-    $VENV/bin/scriptforge scan ~/bin           classify your scripts
-    $VENV/bin/scriptforge inspect ~/bin/<one>  show a recovered interface
-
-  Add the icon to your Desktop and app menu:
-    ./install.sh --desktop
-
-DONE
+printf '\n%sScriptForge is ready.%s\n\n' "$GREEN" "$OFF"
+printf '  window   %s gui\n' "$APP_BIN/scriptforge"
+printf '  terminal %s\n' "$APP_BIN/scriptforge tui"
+printf '  inspect  %s inspect ~/bin/yourscript.sh\n\n' "$APP_BIN/scriptforge"
