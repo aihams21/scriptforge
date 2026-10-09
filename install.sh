@@ -46,7 +46,7 @@ if [ "$(id -u)" -ne 0 ]; then
   fi
 fi
 
-if command -v apt-get >/dev/null 2>&1 && [ -z "$SKIP_APT" ]; then
+if command -v apt-get >/dev/null 2>&1 && [ -z "${SKIP_APT:-}" ]; then
   step "system packages"
   # Qt needs these at import time on a bare container. python3-pip/venv build the
   # virtualenv; the rest are Qt/xcb runtime libraries that are present on a
@@ -79,7 +79,7 @@ step "download"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-if [ -n "$SCRIPTFORGE_LOCAL" ]; then
+if [ -n "${SCRIPTFORGE_LOCAL:-}" ]; then
   SRC="$SCRIPTFORGE_LOCAL"
   ok "using local source: $SRC"
 else
@@ -125,7 +125,7 @@ esac
 ok "linked $APP_BIN/scriptforge"
 
 # ------------------------------------------------------------------- launch
-if [ "$GUI_ONLY" -eq 1 ] && [ -n "$DISPLAY$WAYLAND_DISPLAY" ]; then
+if [ "$GUI_ONLY" -eq 1 ] && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
   step "desktop integration"
   "$PREFIX/packaging/linux/install-desktop.sh" >/dev/null 2>&1 \
     && ok "desktop icon installed" \
