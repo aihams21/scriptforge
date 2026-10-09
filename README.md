@@ -12,12 +12,12 @@ to document, and gives you a window instead of a prompt.**
 [![python](https://img.shields.io/badge/python-3.10%2B-58a6ff?style=flat-square)](https://www.python.org/downloads/)
 [![linux](https://img.shields.io/badge/linux-x86__64-f0a028?style=flat-square&logo=linux&logoColor=white)](https://github.com/aihams21/scriptforge/releases/latest)
 [![windows](https://img.shields.io/badge/windows-10%20%2F%2011-0078d4?style=flat-square&logo=windows&logoColor=white)](https://github.com/aihams21/scriptforge/releases/latest)
-[![tests](https://img.shields.io/badge/tests-76%20passing-3fb950?style=flat-square)](#tests)
+[![tests](https://img.shields.io/badge/tests-91%20passing-3fb950?style=flat-square)](#tests)
 [![licence-check](https://img.shields.io/badge/licence-MIT-green?style=flat-square)](LICENSE)
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/aihams21/scriptforge?quickstart=1)
 [![Fork](https://img.shields.io/github/forks/aihams21/scriptforge?style=flat-square&label=forks)](https://github.com/aihams21/scriptforge/network/members)
-[![stars](https://img.shields.io/github/stars/aihams21/scriptforge?style=flat-square&label=stars)](https://github.com/aihams21/scriptforge/stargazers)
+[![stars](https://img.shields.io/github/stars/aihams21/scriptforge?style=flat-square&label=stars)](https://github.com/aihams21/scriptforge)
 
 </div>
 
