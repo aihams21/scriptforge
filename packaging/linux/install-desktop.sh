@@ -27,7 +27,9 @@ die() { printf '  %s✗%s %s\n' "$RED" "$OFF" "$1" >&2; exit 1; }
 
 installed_files=(
   "$APPS_DIR/$APP_NAME.desktop"
+  "$APPS_DIR/$APP_NAME-gui.desktop"
   "$DESKTOP_DIR/$APP_NAME.desktop"
+  "$DESKTOP_DIR/$APP_NAME-GUI.desktop"
 )
 
 uninstall() {
@@ -85,6 +87,23 @@ sed "s|@EXEC@|$EXEC_PATH|g" "$TEMPLATE" > "$generated"
 chmod +x "$generated"
 ok "app-menu entry: $generated"
 
+# the browser GUI gets its own entry (no terminal window)
+GUI_TEMPLATE="$HERE/scriptforge-gui.desktop.in"
+if [ -f "$GUI_TEMPLATE" ]; then
+  gui_entry="$APPS_DIR/$APP_NAME-gui.desktop"
+  sed "s|@EXEC@|$EXEC_PATH|g" "$GUI_TEMPLATE" > "$gui_entry"
+  chmod +x "$gui_entry"
+  ok "app-menu entry: $gui_entry"
+  if [ -d "$DESKTOP_DIR" ]; then
+    cp -f "$gui_entry" "$DESKTOP_DIR/$APP_NAME-GUI.desktop"
+    chmod +x "$DESKTOP_DIR/$APP_NAME-GUI.desktop"
+    if command -v gio >/dev/null 2>&1; then
+      gio set "$DESKTOP_DIR/$APP_NAME-GUI.desktop" metadata::trusted true 2>/dev/null || true
+    fi
+    ok "desktop shortcut: $DESKTOP_DIR/$APP_NAME-GUI.desktop"
+  fi
+fi
+
 # --------------------------------------------------------------- Desktop shortcut
 if [ -d "$DESKTOP_DIR" ]; then
   cp -f "$generated" "$DESKTOP_DIR/$APP_NAME.desktop"
@@ -109,7 +128,7 @@ cat <<DONE
 
 $(printf '%s' "$GREEN")Desktop integration ready.$(printf '%s' "$OFF")
 
-  App menu : ScriptForge  (search "script" in your launcher)
+  App menu : ScriptForge (terminal)  and  ScriptForge GUI (browser)
   Desktop  : $DESKTOP_DIR/$APP_NAME.desktop
   Command  : $EXEC_PATH
 

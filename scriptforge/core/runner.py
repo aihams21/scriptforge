@@ -68,6 +68,7 @@ class ScriptRunner:
         self.on_output = on_output
         self.env = {**os.environ, **(env or {})}
         self._child = None  # set while a PTY run is live, so Stop can kill it
+        self._prepared = None  # (argv, child) forked by prepare()
 
     # --------------------------------------------------------------- building argv
 
@@ -109,10 +110,40 @@ class ScriptRunner:
 
     # --------------------------------------------------------------- execution
 
-    def run_plain(self, args: Iterable[str] = (), flags: Iterable[str] = (), timeout: int | None = None) -> RunResult:
+    def prepare(self, args: Iterable[str] = (), flags: Iterable[str] = ()):
+        """Fork the child now, on the caller's (UI) thread.
+
+        `pexpect` uses `forkpty()`. Forking from inside a worker thread of an
+        already multi-threaded process can deadlock the child on an inherited
+        lock, so the UI thread does the fork and the worker only does reads.
+        Returns the child, or None when this platform has no pexpect.
+        """
+        if not HAS_PEXPECT:
+            return None
+        if getattr(self, "_prepared", None) is not None:
+            return self._prepared[1]
+        argv = self.build_argv(args, flags)
+        try:
+            child = pexpect.spawn(
+                argv[0], argv[1:], env=self.env, encoding="utf-8",
+                codec_errors="replace", timeout=0.5, echo=False,
+            )
+        except Exception:  # noqa: BLE001 - reported later by the run itself
+            return None
+        self._prepared = (argv, child)
+        return child
+
+    def run_plain(
+        self,
+        args: Iterable[str] = (),
+        flags: Iterable[str] = (),
+        timeout: int | None = None,
+        on_output: Callable[[str], None] | None = None,
+    ) -> RunResult:
         """Non-interactive run. Returns combined stdout/stderr."""
         argv = self.build_argv(args, flags)
         started = time.monotonic()
+        emit = on_output or self._emit
         try:
             proc = subprocess.run(
                 argv,
@@ -130,7 +161,7 @@ class ScriptRunner:
             return RunResult(argv, 127, str(exc), time.monotonic() - started, self.answers, False, "pipes")
 
         output = proc.stdout + proc.stderr
-        self._emit(output)
+        emit(output)
         return RunResult(argv, proc.returncode, output, time.monotonic() - started, self.answers, False, "pipes")
 
     def run_interactive(
@@ -138,6 +169,7 @@ class ScriptRunner:
         args: Iterable[str] = (),
         flags: Iterable[str] = (),
         answer_order: list[str] | None = None,
+        on_output: Callable[[str], None] | None = None,
     ) -> RunResult:
         """Run over a PTY, feeding `self.answers` into each prompt.
 
@@ -155,15 +187,21 @@ class ScriptRunner:
         order = list(answer_order or self.answers.keys())
         queue = [self.answers[k] for k in order if self.answers.get(k) not in (None, "")]
         collected: list[str] = []
+        emit = on_output or self._emit
 
-        try:
-            child = pexpect.spawn(
-                argv[0], argv[1:], env=self.env, encoding="utf-8",
-                codec_errors="replace", timeout=0.5, echo=False,
-            )
-        except Exception as exc:  # noqa: BLE001
-            return RunResult(argv, 127, f"spawn failed: {exc}",
-                             time.monotonic() - started, self.answers, False, "pty")
+        prepared = getattr(self, "_prepared", None)
+        if prepared is not None:
+            argv, child = prepared
+            self._prepared = None
+        else:
+            try:
+                child = pexpect.spawn(
+                    argv[0], argv[1:], env=self.env, encoding="utf-8",
+                    codec_errors="replace", timeout=0.5, echo=False,
+                )
+            except Exception as exc:  # noqa: BLE001
+                return RunResult(argv, 127, f"spawn failed: {exc}",
+                                 time.monotonic() - started, self.answers, False, "pty")
 
         self._child = child
         deadline = started + self.timeout
@@ -189,7 +227,7 @@ class ScriptRunner:
                     # On a timeout tick `before` still holds unconsumed data,
                     # so capturing there would duplicate output.
                     collected.append(chunk)
-                    self._emit(chunk)
+                    emit(chunk)
 
                 if idx == 1:  # EOF
                     break
@@ -212,6 +250,18 @@ class ScriptRunner:
                         child.sendline(queue.pop(0))
                         idle_ticks = 0
         finally:
+            # Drain whatever is still buffered. If the child died during a
+            # timeout tick we broke out before consuming the last output, and
+            # `child.before` would otherwise swallow it silently.
+            try:
+                while True:
+                    more = child.read_nonblocking(4096, timeout=0.2)
+                    if not more:
+                        break
+                    collected.append(more)
+                    emit(more)
+            except Exception:  # noqa: BLE001 - EOF or a dead pty; we are done
+                pass
             try:
                 if child.isalive():
                     child.terminate(force=True)

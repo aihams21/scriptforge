@@ -26,6 +26,7 @@ def _print_usage() -> None:
 USAGE
   scriptforge                    launch the TUI (default)
   scriptforge ui                 same, explicitly
+  scriptforge gui                open the browser GUI (mouse-driven)
   scriptforge inspect <script>   show the recovered interface
   scriptforge plan <script>      show what forging would do
   scriptforge forge <script>     re-program a UI-less script
@@ -91,6 +92,23 @@ def main(argv: list[str] | None = None) -> int:
 
         roots = [Path(a) for a in rest] or None
         ScriptForge(roots=roots).run()
+        return 0
+
+    if cmd in ("gui", "web"):
+        from .web import serve
+
+        roots = [Path(a) for a in rest] or None
+        host, port, server = serve(roots=roots, open_browser="--no-open" not in rest)
+        print(f"  {theme.version_line()}")
+        print(f"  GUI   http://{host}:{port}/")
+        print("  Ctrl+C to stop.")
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            print("\n  stopped.")
+        finally:
+            server.shutdown()
+            server.server_close()
         return 0
 
     if cmd == "inspect":

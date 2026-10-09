@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=ScriptForge GUI
+GenericName=Script Forge (browser)
+Comment=Turn any bash or python script into a usable app - opens in your browser
+Exec=@EXEC@ gui
+Icon=scriptforge
+Terminal=false
+Categories=Development;
+Keywords=pentest;security;bash;python;wrapper;ctf;kali;gui;
+StartupNotify=false

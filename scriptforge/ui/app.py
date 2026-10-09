@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 from textual.app import App, ComposeResult
+from textual import work
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Footer, Header, Input, OptionList, Static, TextArea
 from textual.widgets.option_list import Option
@@ -83,6 +84,16 @@ class ScriptForge(App):
             pass
 
     # ------------------------------------------------------------- scanning
+
+    def _modal_open(self) -> bool:
+        """True while a dialog is stacked on top of the main screen.
+
+        App-level key bindings stay live while a modal is up, so every action
+        that touches main-screen widgets has to bail out here. Otherwise a
+        stray keypress reaches into a widget that is not mounted and kills
+        the app.
+        """
+        return len(self.screen_stack) > 1
 
     def scan_all(self) -> None:
         self.irs = []
@@ -198,12 +209,17 @@ class ScriptForge(App):
     # ------------------------------------------------------------- actions
 
     def action_focus_filter(self) -> None:
+        if self._modal_open():
+            return
         self.query_one("#filter", Input).focus()
 
     def action_refresh(self) -> None:
+        if self._modal_open():
+            return
         self.scan_all()
         self.notify(f"rescanned · {len(self.irs)} scripts", title="scriptforge")
 
+    @work
     async def action_forge(self) -> None:
         ir = self.selected
         if ir is None:
@@ -243,18 +259,23 @@ class ScriptForge(App):
                 argv.append(value)
 
         runner = ScriptRunner(ir.path, answers=answers, timeout=600)
-        preview = runner.preview(answers.get("__argv__", []))
-        log = await self.push_screen_wait(RunScreen(ir.name, preview, runner, answers))
+        preview = runner.preview()
+        screen = RunScreen(ir.name, preview, runner, answers)
+        closed = await self.push_screen_wait(screen)
 
-        if log is True and self._last_result is not None:
-            self.vault.log_run(
-                str(ir.path), ir.kind.value, self._last_result.argv,
-                self._last_result.exit_code, self._last_result.duration_s,
-                self._last_result.output, answers,
-            )
-            self.notify(
-                f"{ir.name} → exit {self._last_result.exit_code} "
-                f"({self._last_result.duration_s:.1f}s)  logged",
-                title="run finished",
-                severity="information" if self._last_result.exit_code == 0 else "warning",
-            )
+        result = screen.result
+        if closed is not True or result is None:
+            if screen._error:
+                self.notify(screen._error, title="run failed", severity="error")
+            return
+
+        self._last_result = result
+        self.vault.log_run(
+            str(ir.path), ir.kind.value, result.argv,
+            result.exit_code, result.duration_s, result.output, answers,
+        )
+        self.notify(
+            f"{ir.name} → exit {result.exit_code} ({result.duration_s:.1f}s)  logged",
+            title="run finished",
+            severity="information" if result.ok else "warning",
+        )

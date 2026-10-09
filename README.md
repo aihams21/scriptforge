@@ -14,6 +14,9 @@ gives it one.
 Runs *inside* your Linux distro — Kali bare-metal **or** Kali in VirtualBox.
 Same package, same command, same look.
 
+**Two interfaces:** a terminal TUI, and a browser GUI you drive with the mouse.
+Same engine behind both.
+
 </div>
 
 ```
@@ -105,12 +108,38 @@ Remove it again:
 ./packaging/linux/install-desktop.sh --uninstall
 ```
 
-### Launch
+#### Launch — pick your interface
 
 ```bash
-scriptforge                        # if it is on your PATH
-./.venv/bin/scriptforge            # straight from the folder
+scriptforge gui                    # browser GUI, mouse-driven
+scriptforge                        # terminal UI
 ```
+
+`gui` starts a local server on `127.0.0.1` and opens your browser. Nothing is
+exposed beyond loopback and no data leaves the machine.
+
+### Desktop entries
+
+`./install.sh --desktop` creates **two** launchers:
+
+| Entry | What it opens |
+|---|---|
+| **ScriptForge** | the terminal interface |
+| **ScriptForge GUI** | the browser interface |
+
+### Keys in the terminal UI
+
+| Key | Action |
+|---|---|
+| `↑` `↓` | move between scripts (the right pane updates live) |
+| `/` | search |
+| `Enter` | open the generated interface, or run it |
+| `r` | rescan |
+| `q` | quit (only from the main screen — never from a dialog) |
+| `Esc` | cancel / close the current dialog |
+
+Keypresses inside a dialog never fall through to the app, so nothing closes
+underneath you.
 
 > **Note on Kali's PEP 668.** Kali marks Python as externally managed, so a bare
 > `pip install` may refuse. `install.sh` uses a venv, which sidesteps it entirely.
@@ -177,8 +206,10 @@ powershell -ExecutionPolicy Bypass -File install.ps1 -Uninstall
 ## Usage
 
 ```bash
-scriptforge                            # the interactive TUI
-scriptforge ui ~/bin ~/usr/local/bin    # start on specific folders
+scriptforge gui                         # browser GUI
+scriptforge                             # terminal TUI
+scriptforge ui ~/bin ~/usr/local/bin     # TUI on specific folders
+scriptforge gui ~/scripts               # GUI on specific folders
 
 scriptforge inspect <script>            # what interface was recovered?
 scriptforge inspect <script> --json     # same, as JSON
@@ -218,6 +249,7 @@ language again.
 ```
 scriptforge/
 ├── scriptforge/
+│   ├── web.py               browser GUI: stdlib http.server + SSE streaming
 │   ├── core/
 │   │   ├── parser/
 │   │   │   ├── ir.py             ★ the shared IR
@@ -229,7 +261,8 @@ scriptforge/
 │   │   ├── runner.py             process + PTY driving
 │   │   └── vault.py              run history (SQLite)
 │   ├── ui/
-│   │   ├── app.py                main browser
+│   │   ├── app.py                terminal UI
+│   │   ├── web.html              browser UI (single page, no build step)
 │   │   ├── widgets.py            generated forms + the run console
 │   │   └── theme.py              colours and the AIHAM AM banner
 │   ├── forge.py                  ★ orchestrator
@@ -289,6 +322,10 @@ Things this will not do, stated plainly:
 - **Curses apps cannot be decomposed into widgets.** `htop` and `vim` get an
   embedded terminal, not a form. That is a hard limit of the terminal itself.
 - **Windows has no PTY**, so prompt injection is unavailable there.
+- **`forkpty()` is called from a worker thread** on the web-GUI path, which
+  Python 3.14 flags as a deadlock risk. The terminal UI avoids this by forking
+  on the UI thread (`ScriptRunner.prepare`). In practice it has not surfaced,
+  but it is a real latent hazard rather than a solved problem.
 
 ---
 

@@ -7,6 +7,7 @@ subcommands gets a menu; a curses tool gets an embedded terminal.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from textual.app import ComposeResult
@@ -35,6 +36,15 @@ from . import theme
 class Confirm(ModalScreen[bool]):
     """A yes/no dialog built on top of a script's y/n prompt."""
 
+    BINDINGS = [
+        ("escape", "dismiss_no", "No"),
+        ("n", "dismiss_no", "No"),
+        ("y", "dismiss_yes", "Yes"),
+        ("q", "dismiss_no", "No"),
+        ("/", "noop", ""),
+        ("r", "noop", ""),
+    ]
+
     def __init__(self, message: str, title: str = "Confirm"):
         super().__init__()
         self._message = message
@@ -51,6 +61,15 @@ class Confirm(ModalScreen[bool]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "yes")
 
+    def action_dismiss_yes(self) -> None:
+        self.dismiss(True)
+
+    def action_dismiss_no(self) -> None:
+        self.dismiss(False)
+
+    def action_noop(self) -> None:
+        return
+
 
 class ScriptScreen(ModalScreen[dict[str, Any]]):
     """The generated form for one script.
@@ -58,7 +77,12 @@ class ScriptScreen(ModalScreen[dict[str, Any]]):
     Renders a widget per IR field. Returns {values, subcommand, argv_flags}.
     """
 
-    BINDINGS = [("escape", "cancel", "Cancel")]
+    BINDINGS = [
+        ("escape", "cancel", "Cancel"),
+        ("q", "cancel", "Cancel"),
+        ("/", "noop", ""),
+        ("r", "noop", ""),
+    ]
 
     def __init__(self, ir: ScriptIR, answer_order: list[str] | None = None):
         super().__init__()
@@ -209,6 +233,10 @@ class ScriptScreen(ModalScreen[dict[str, Any]]):
     def action_cancel(self) -> None:
         self.dismiss(None)
 
+    def action_noop(self) -> None:
+        """Swallow keys the App would otherwise act on from underneath us."""
+        return
+
 
 class RunScreen(ModalScreen[bool]):
     """Live PTY output with a kill switch.
@@ -217,7 +245,12 @@ class RunScreen(ModalScreen[bool]):
     child, and the screen stays up until the process is actually gone.
     """
 
-    BINDINGS = [("escape", "stop", "Stop")]
+    BINDINGS = [
+        ("escape", "stop", "Stop"),
+        ("q", "stop", "Stop"),
+        ("/", "noop", ""),
+        ("r", "noop", ""),
+    ]
 
     def __init__(
         self,
@@ -232,6 +265,7 @@ class RunScreen(ModalScreen[bool]):
         self.runner = runner
         self.answers = answers or {}
         self.result = None
+        self._error: str | None = None
         self._killed = False
 
     def compose(self) -> ComposeResult:
@@ -251,20 +285,32 @@ class RunScreen(ModalScreen[bool]):
         if self.runner is None:
             self._finish(None)
             return
-        self.run_worker(self._drive(), thread=True)
+        # Fork here, on the UI thread: pexpect's forkpty() is not safe to call
+        # from a worker thread of a multi-threaded process.
+        self.runner.prepare()
+        # exit_on_error=False: a failing script must never take the app down.
+        self.run_worker(self._run(), name="scriptforge-run", exit_on_error=False)
 
     # ------------------------------------------------------------- execution
 
-    def _drive(self):
-        from ..core.runner import ScriptRunner
+    async def _run(self) -> None:
+        """Blocking work goes on a real thread so the UI never blocks."""
+        try:
+            result = await asyncio.to_thread(self._drive)
+        except Exception as exc:  # noqa: BLE001 - a bad script is not an app crash
+            self.result = None
+            self._error = f"{type(exc).__name__}: {exc}"
+            self._finish(None)
+            return
+        self._finish(result)
 
+    def _drive(self):
         assert self.runner is not None
-        pane = self.app.query_one("#pane") if hasattr(self, "app") else None
         chunks: list[str] = []
 
         def sink(chunk: str) -> None:
             chunks.append(chunk)
-            self.call_from_thread(self._write, chunk)
+            self.app.call_from_thread(self._write, chunk)
 
         if self.answers:
             order = list(self.answers.keys())
@@ -275,7 +321,8 @@ class RunScreen(ModalScreen[bool]):
         if self._killed:
             result.timed_out = True
         self.result = result
-        self.call_from_thread(self._finish, result)
+        self.app.call_from_thread(self._finish, result)
+        return result
 
     def _write(self, chunk: str) -> None:
         try:
@@ -285,7 +332,9 @@ class RunScreen(ModalScreen[bool]):
 
     def _finish(self, result) -> None:
         status = self.query_one("#run-status")
-        if result is None:
+        if self._error:
+            status.update(f"[{theme.CRIT}]failed[/] {self._error}")
+        elif result is None:
             status.update("[dim]no runner attached[/dim]")
         else:
             colour = theme.OK if result.exit_code == 0 else theme.CRIT
@@ -322,6 +371,9 @@ class RunScreen(ModalScreen[bool]):
 
     def action_stop(self) -> None:
         self._kill()
+
+    def action_noop(self) -> None:
+        return
 
 
 CSS = """

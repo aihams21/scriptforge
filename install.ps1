@@ -50,7 +50,9 @@ Write-Host ''
 
 $Links = @(
     (Join-Path $StartM 'ScriptForge.lnk')
+    (Join-Path $StartM 'ScriptForge GUI.lnk')
     (Join-Path $Desktop  'ScriptForge.lnk')
+    (Join-Path $Desktop  'ScriptForge GUI.lnk')
 )
 
 if ($Uninstall) {
@@ -151,18 +153,26 @@ if (-not $NoShortcuts) {
     if (-not (Test-Path $Target)) { $Target = Join-Path $Venv 'Scripts\scriptforge-scriptforge.exe' }
     if (-not (Test-Path $Target)) { $Target = $PyExe }
 
+    # Terminal UI + browser GUI, so there is a mouse-driven option on Windows too
+    $entries = @(
+        @{ Name = 'ScriptForge';      Args = 'ui';  Style = 1 }
+        @{ Name = 'ScriptForge GUI';  Args = 'gui'; Style = 7 }
+    )
+
     foreach ($dir in @($StartM, $Desktop)) {
         if (-not (Test-Path $dir)) { continue }
-        $lnk = Join-Path $dir 'ScriptForge.lnk'
-        $sc  = $shell.CreateShortcut($lnk)
-        $sc.TargetPath       = $Target
-        $sc.Arguments        = 'ui'
-        $sc.WorkingDirectory = $Root
-        $sc.Description      = 'Turn any bash, python or PowerShell script into a usable app'
-        if (Test-Path $Icon) { $sc.IconLocation = "$Icon,0" }
-        $sc.WindowStyle      = 1   # normal console
-        $sc.Save()
-        Ok "shortcut -> $lnk"
+        foreach ($e in $entries) {
+            $lnk = Join-Path $dir ($e.Name + '.lnk')
+            $sc  = $shell.CreateShortcut($lnk)
+            $sc.TargetPath       = $Target
+            $sc.Arguments        = $e.Args
+            $sc.WorkingDirectory = $Root
+            $sc.Description      = 'Turn any bash, python or PowerShell script into a usable app'
+            if (Test-Path $Icon) { $sc.IconLocation = "$Icon,0" }
+            $sc.WindowStyle      = $e.Style   # 1 = console, 7 = minimised
+            $sc.Save()
+            Ok "shortcut -> $lnk"
+        }
     }
 }
 
@@ -171,7 +181,7 @@ if (-not $NoShortcuts) {
 Write-Host ''
 Write-Host 'scriptforge is ready.' -ForegroundColor Green
 Write-Host ''
-Write-Host '  Run it:   Start menu -> ScriptForge   (or the Desktop shortcut)'
+Write-Host '  Run it:   Start menu -> ScriptForge (terminal) or ScriptForge GUI (browser)'
 Write-Host '  Or:      .\.venv\Scripts\scriptforge.exe ui'
 Write-Host ''
 Write-Host '  Try:'
